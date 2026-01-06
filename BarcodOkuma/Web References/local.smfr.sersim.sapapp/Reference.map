@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DiscoveryClientResultsFile xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Results>
+    <DiscoveryClientResult referenceType="System.Web.Services.Discovery.ContractReference" url="http://sapapp.sersim.smfr.local:8000/sap/bc/srt/wsdl/flv_10002A111AD1/bndg_url/sap/bc/srt/rfc/sap/zsfr_mm_008_fm_01/100/zsfr_mm_022_fm_01/zsfr_mm_022_fm_01?sap-client=100" filename="zsfr_mm_022_fm_01.wsdl" />
+  </Results>
+</DiscoveryClientResultsFile>
