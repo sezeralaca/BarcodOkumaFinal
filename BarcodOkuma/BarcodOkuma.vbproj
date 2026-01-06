@@ -99,7 +99,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Database.vb" />
-    <Compile Include="frmBarkod.Designer.vb" />
+    <Compile Include="frmBarkod.Designer.vb">
+      <DependentUpon>frmBarkod.vb</DependentUpon>
+    </Compile>
     <Compile Include="frmBarkod.vb">
       <SubType>Form</SubType>
     </Compile>
@@ -127,6 +129,9 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="frmBarkod.resx">
+      <DependentUpon>frmBarkod.vb</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="My Project\Resources.resx">
       <Generator>VbMyResourcesResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.vb</LastGenOutput>
