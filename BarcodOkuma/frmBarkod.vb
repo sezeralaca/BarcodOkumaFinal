@@ -175,7 +175,6 @@ Partial Public Class frmBarkod
             p.AGIRLIK = weight
             p.SERINO = Barkod
             p.TARIH = DateTime.Now.ToString("yyyy-MM-dd")
-            p.ZAMAN = DateTime.Now.ToString("hh:mm:ss")
             Dim parray As ZSFR_MM_008_S_02() = New ZSFR_MM_008_S_02(0) {}
             parray(0) = p
             Dim param As ZSFR_MM_008_FM_01 = New ZSFR_MM_008_FM_01()

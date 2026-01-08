@@ -158,9 +158,9 @@ Namespace local.smfr.sersim.sapapp
         Private aGIRLIKField As String
         
         Private tARIHField As String
-        
-        Private zAMANField As Date
-        
+
+        'Private zAMANField As Date
+
         '''<remarks/>
         <System.Xml.Serialization.XmlElementAttribute(Form:=System.Xml.Schema.XmlSchemaForm.Unqualified)>  _
         Public Property SERINO() As String
@@ -193,17 +193,17 @@ Namespace local.smfr.sersim.sapapp
                 Me.tARIHField = value
             End Set
         End Property
-        
-        '''<remarks/>
-        <System.Xml.Serialization.XmlElementAttribute(Form:=System.Xml.Schema.XmlSchemaForm.Unqualified, DataType:="time")>  _
-        Public Property ZAMAN() As Date
-            Get
-                Return Me.zAMANField
-            End Get
-            Set
-                Me.zAMANField = value
-            End Set
-        End Property
+
+        ''''<remarks/>
+        '<System.Xml.Serialization.XmlElementAttribute(Form:=System.Xml.Schema.XmlSchemaForm.Unqualified, DataType:="time")>  _
+        'Public Property ZAMAN() As Date
+        '    Get
+        '        Return Me.zAMANField
+        '    End Get
+        '    Set
+        '        Me.zAMANField = value
+        '    End Set
+        'End Property
     End Class
     
     '''<remarks/>
