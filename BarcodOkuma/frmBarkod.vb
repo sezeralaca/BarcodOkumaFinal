@@ -308,7 +308,9 @@ Partial Public Class frmBarkod
                         client = New TcpClient()
                         client.Connect(ip, port)
                         stream = client.GetStream()
-                        ' No timeout - use blocking read
+                        ' No timeout - use blocking read for immediate data capture
+                        ' Requirement: Socket must listen indefinitely without timeout
+                        ' Connection will be detected via bytesRead = 0 or IOException
                         stream.ReadTimeout = System.Threading.Timeout.Infinite
 
                         UpdateConnectionStatus(hat, True)
@@ -365,8 +367,8 @@ Partial Public Class frmBarkod
                         client = Nothing
                     End If
 
-                    ' Wait before reconnecting
-                    Threading.Thread.Sleep(2000)
+                    ' Wait before reconnecting (cancellable)
+                    cancellationToken.WaitHandle.WaitOne(2000)
 
                 Catch ex As SocketException
                     ' Network error
@@ -391,8 +393,8 @@ Partial Public Class frmBarkod
                         client = Nothing
                     End If
 
-                    ' Wait before reconnecting
-                    Threading.Thread.Sleep(2000)
+                    ' Wait before reconnecting (cancellable)
+                    cancellationToken.WaitHandle.WaitOne(2000)
 
                 Catch ex As Exception
                     ' Other exceptions
@@ -402,8 +404,6 @@ Partial Public Class frmBarkod
                 End Try
             End While
 
-        Catch ex As Threading.ThreadAbortException
-            ' Thread being aborted, don't log
         Catch ex As Exception
             CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
                                                                                        ListBox1.Items.Add($"Thread hatası ({hat}): {ex.Message}")
