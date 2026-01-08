@@ -28,9 +28,9 @@ Partial Public Class frmBarkod
     Private threadA As Thread
     Private threadB As Thread
     Private threadC As Thread
-    Private isRunningA As Boolean = False
-    Private isRunningB As Boolean = False
-    Private isRunningC As Boolean = False
+    Private cancellationSourceA As Threading.CancellationTokenSource
+    Private cancellationSourceB As Threading.CancellationTokenSource
+    Private cancellationSourceC As Threading.CancellationTokenSource
 
     Public Sub New()
         InitializeComponent()
@@ -119,9 +119,10 @@ Partial Public Class frmBarkod
 
     Private Sub Window_FormClosing(ByVal sender As Object, ByVal e As System.Windows.Forms.FormClosingEventArgs) Handles Me.FormClosing
         Try
-            isRunningA = False
-            isRunningB = False
-            isRunningC = False
+            ' Cancel all threads
+            If cancellationSourceA IsNot Nothing Then cancellationSourceA.Cancel()
+            If cancellationSourceB IsNot Nothing Then cancellationSourceB.Cancel()
+            If cancellationSourceC IsNot Nothing Then cancellationSourceC.Cancel()
 
             If port1.IsOpen Then port1.Close()
             If port2.IsOpen Then port2.Close()
@@ -137,6 +138,11 @@ Partial Public Class frmBarkod
             If threadA IsNot Nothing AndAlso threadA.IsAlive Then threadA.Join(1000)
             If threadB IsNot Nothing AndAlso threadB.IsAlive Then threadB.Join(1000)
             If threadC IsNot Nothing AndAlso threadC.IsAlive Then threadC.Join(1000)
+
+            ' Dispose cancellation sources
+            If cancellationSourceA IsNot Nothing Then cancellationSourceA.Dispose()
+            If cancellationSourceB IsNot Nothing Then cancellationSourceB.Dispose()
+            If cancellationSourceC IsNot Nothing Then cancellationSourceC.Dispose()
         Finally
             port1.Dispose()
             port2.Dispose()
@@ -246,57 +252,113 @@ Partial Public Class frmBarkod
                                                                                       Case "A"
                                                                                           If isConnected Then
                                                                                               lblConnectionA.ForeColor = Color.Green
-                                                                                              lblConnectionA.Text = "Baðlý"
+                                                                                              lblConnectionA.Text = "Baï¿½lï¿½"
                                                                                           Else
                                                                                               lblConnectionA.ForeColor = Color.Red
-                                                                                              lblConnectionA.Text = "Baðlý Deðil"
+                                                                                              lblConnectionA.Text = "Baï¿½lï¿½ Deï¿½il"
                                                                                           End If
                                                                                       Case "B"
                                                                                           If isConnected Then
                                                                                               lblConnectionB.ForeColor = Color.Green
-                                                                                              lblConnectionB.Text = "Baðlý"
+                                                                                              lblConnectionB.Text = "Baï¿½lï¿½"
                                                                                           Else
                                                                                               lblConnectionB.ForeColor = Color.Red
-                                                                                              lblConnectionB.Text = "Baðlý Deðil"
+                                                                                              lblConnectionB.Text = "Baï¿½lï¿½ Deï¿½il"
                                                                                           End If
                                                                                       Case "C"
                                                                                           If isConnected Then
                                                                                               lblConnectionC.ForeColor = Color.Green
-                                                                                              lblConnectionC.Text = "Baðlý"
+                                                                                              lblConnectionC.Text = "Baï¿½lï¿½"
                                                                                           Else
                                                                                               lblConnectionC.ForeColor = Color.Red
-                                                                                              lblConnectionC.Text = "Baðlý Deðil"
+                                                                                              lblConnectionC.Text = "Baï¿½lï¿½ Deï¿½il"
                                                                                           End If
                                                                                   End Select
                                                                               End Sub), New Object() {})
     End Sub
 
-    Private Sub BarcodeReaderThread(ip As String, port As Integer, hat As String, ByRef client As TcpClient, ByRef isRunning As Boolean)
+    Private Sub BarcodeReaderThread(ip As String, port As Integer, hat As String, ByRef client As TcpClient, cancellationToken As Threading.CancellationToken)
+        Dim stream As NetworkStream = Nothing
+        Dim lastLogTime As DateTime = DateTime.MinValue
+        Const logInterval As Integer = 30 ' Log every 30 seconds
+
         Try
-            While isRunning
+            ' Log thread start
+            CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                                                                                       ListBox1.Items.Add($"Thread baÅŸlatÄ±ldÄ± ({hat}): {ip}:{port}")
+                                                                                   End Sub), New Object() {})
+
+            While Not cancellationToken.IsCancellationRequested
                 Try
+                    ' Establish connection if not connected
                     If client Is Nothing OrElse Not client.Connected Then
+                        If client IsNot Nothing Then
+                            Try
+                                client.Close()
+                            Catch
+                            End Try
+                            client = Nothing
+                        End If
+
+                        ' Log connection attempt
+                        CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                                                                                                   ListBox1.Items.Add($"BaÄŸlantÄ± kuruluyor ({hat}): {ip}:{port}")
+                                                                                               End Sub), New Object() {})
+
                         client = New TcpClient()
                         client.Connect(ip, port)
+                        stream = client.GetStream()
+                        ' No timeout - use blocking read for immediate data capture
+                        ' Requirement: Socket must listen indefinitely without timeout
+                        ' Connection will be detected via bytesRead = 0 or IOException
+                        stream.ReadTimeout = System.Threading.Timeout.Infinite
+
                         UpdateConnectionStatus(hat, True)
+                        CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                                                                                                   ListBox1.Items.Add($"BaÄŸlandÄ± ({hat}): {ip}:{port}")
+                                                                                               End Sub), New Object() {})
                     End If
 
-                    Using stream = client.GetStream()
-                        stream.ReadTimeout = 5000
-                        Dim buffer As Byte() = New Byte(1023) {}
-                        Dim bytesRead As Integer = stream.Read(buffer, 0, buffer.Length)
+                    ' Blocking read - waits indefinitely for data
+                    Dim buffer As Byte() = New Byte(1023) {}
+                    Dim bytesRead As Integer = stream.Read(buffer, 0, buffer.Length)
 
-                        If bytesRead > 0 Then
-                            Dim barcode As String = System.Text.Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim()
-                            If Not String.IsNullOrWhiteSpace(barcode) Then
-                                OnBarcodeReceived(ip, barcode)
-                            End If
+                    If bytesRead > 0 Then
+                        Dim barcode As String = System.Text.Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim()
+                        If Not String.IsNullOrWhiteSpace(barcode) Then
+                            OnBarcodeReceived(ip, barcode)
+                            CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                                                                                                       ListBox1.Items.Add($"Barkod alÄ±ndÄ± ({hat}): {barcode}")
+                                                                                                   End Sub), New Object() {})
                         End If
-                    End Using
-                Catch ex As TimeoutException
-                    ' Timeout - continue listening
+                    ElseIf bytesRead = 0 Then
+                        ' Connection closed by remote host
+                        Throw New System.IO.IOException("BaÄŸlantÄ± uzak sunucu tarafÄ±ndan kapatÄ±ldÄ±")
+                    End If
+
+                    ' Periodic "still alive" logging
+                    If DateTime.Now.Subtract(lastLogTime).TotalSeconds >= logInterval Then
+                        CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                                                                                                   ListBox1.Items.Add($"Dinleniyor ({hat}): {ip}:{port}")
+                                                                                               End Sub), New Object() {})
+                        lastLogTime = DateTime.Now
+                    End If
+
                 Catch ex As System.IO.IOException
                     ' Connection lost
+                    UpdateConnectionStatus(hat, False)
+                    CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                                                                                               ListBox1.Items.Add($"BaÄŸlantÄ± hatasÄ± ({hat}): {ex.Message}")
+                                                                                           End Sub), New Object() {})
+
+                    If stream IsNot Nothing Then
+                        Try
+                            stream.Close()
+                        Catch
+                        End Try
+                        stream = Nothing
+                    End If
+
                     If client IsNot Nothing Then
                         Try
                             client.Close()
@@ -304,22 +366,68 @@ Partial Public Class frmBarkod
                         End Try
                         client = Nothing
                     End If
+
+                    ' Wait before reconnecting (cancellable)
+                    cancellationToken.WaitHandle.WaitOne(2000)
+
+                Catch ex As SocketException
+                    ' Network error
                     UpdateConnectionStatus(hat, False)
-                    Threading.Thread.Sleep(2000)
+                    CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                                                                                               ListBox1.Items.Add($"AÄŸ hatasÄ± ({hat}): {ex.Message}")
+                                                                                           End Sub), New Object() {})
+
+                    If stream IsNot Nothing Then
+                        Try
+                            stream.Close()
+                        Catch
+                        End Try
+                        stream = Nothing
+                    End If
+
+                    If client IsNot Nothing Then
+                        Try
+                            client.Close()
+                        Catch
+                        End Try
+                        client = Nothing
+                    End If
+
+                    ' Wait before reconnecting (cancellable)
+                    cancellationToken.WaitHandle.WaitOne(2000)
+
                 Catch ex As Exception
-                    ListBox1.Items.Add("Hata (" & hat & "): " & ex.Message)
+                    ' Other exceptions
+                    CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                                                                                               ListBox1.Items.Add($"Beklenmeyen hata ({hat}): {ex.Message}")
+                                                                                           End Sub), New Object() {})
                 End Try
             End While
+
         Catch ex As Exception
-            ListBox1.Items.Add("Thread Hatasý (" & hat & "): " & ex.Message)
+            CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                                                                                       ListBox1.Items.Add($"Thread hatasÄ± ({hat}): {ex.Message}")
+                                                                                   End Sub), New Object() {})
         Finally
+            ' Clean up resources
+            If stream IsNot Nothing Then
+                Try
+                    stream.Close()
+                Catch
+                End Try
+            End If
+
             If client IsNot Nothing Then
                 Try
                     client.Close()
                 Catch
                 End Try
             End If
+
             UpdateConnectionStatus(hat, False)
+            CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                                                                                       ListBox1.Items.Add($"Thread sonlandÄ±rÄ±ldÄ± ({hat})")
+                                                                                   End Sub), New Object() {})
         End Try
     End Sub
 
@@ -375,8 +483,8 @@ Partial Public Class frmBarkod
         End If
 
         Try
-            isRunningA = True
-            threadA = New Thread(Sub() BarcodeReaderThread("192.168.0.6", 2112, "A", tcpClientA, isRunningA))
+            cancellationSourceA = New Threading.CancellationTokenSource()
+            threadA = New Thread(Sub() BarcodeReaderThread("192.168.0.6", 2112, "A", tcpClientA, cancellationSourceA.Token))
             threadA.IsBackground = True
             threadA.Start()
         Catch ex As Exception
@@ -385,8 +493,8 @@ Partial Public Class frmBarkod
         End Try
 
         Try
-            isRunningB = True
-            threadB = New Thread(Sub() BarcodeReaderThread("192.168.0.13", 2112, "B", tcpClientB, isRunningB))
+            cancellationSourceB = New Threading.CancellationTokenSource()
+            threadB = New Thread(Sub() BarcodeReaderThread("192.168.0.13", 2112, "B", tcpClientB, cancellationSourceB.Token))
             threadB.IsBackground = True
             threadB.Start()
         Catch ex As Exception
@@ -396,8 +504,8 @@ Partial Public Class frmBarkod
         End Try
 
         Try
-            isRunningC = True
-            threadC = New Thread(Sub() BarcodeReaderThread("192.168.0.8", 2112, "C", tcpClientC, isRunningC))
+            cancellationSourceC = New Threading.CancellationTokenSource()
+            threadC = New Thread(Sub() BarcodeReaderThread("192.168.0.8", 2112, "C", tcpClientC, cancellationSourceC.Token))
             threadC.IsBackground = True
             threadC.Start()
         Catch ex As Exception
@@ -505,7 +613,7 @@ Partial Public Class frmBarkod
         Dim strFileName As String = My.Application.Info.DirectoryPath & "\" & Format(Now, "yyyyMMddHHss") & ".xls"
         wBook.SaveAs(strFileName)
 
-        ListBox1.Items.Add("Bilgiler Excele Aktarýlmýþtýr.")
+        ListBox1.Items.Add("Bilgiler Excele Aktarï¿½lmï¿½ï¿½tï¿½r.")
         ListBox1.Items.Add(strFileName)
 
         releaseObject(wSheet)
