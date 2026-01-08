@@ -10,9 +10,9 @@ Imports BarcodOkuma.local.smfr.sersim.sapapp
 
 Partial Public Class frmBarkod
 
-    Private port1 As New SerialPort("COM15", 9600, Parity.None, 8, StopBits.One)
-    Private port2 As New SerialPort("COM16", 9600, Parity.None, 8, StopBits.One)
-    Private port3 As New SerialPort("COM14", 9600, Parity.None, 8, StopBits.One)
+    Private port1 As New SerialPort("COM1", 9600, Parity.None, 8, StopBits.One)
+    Private port2 As New SerialPort("COM2", 9600, Parity.None, 8, StopBits.One)
+    Private port3 As New SerialPort("COM3", 9600, Parity.None, 8, StopBits.One)
 
     Private rdthread As System.Threading.Thread
     Private sclient As S7Client = New S7Client()
@@ -252,26 +252,26 @@ Partial Public Class frmBarkod
                                                                                       Case "A"
                                                                                           If isConnected Then
                                                                                               lblConnectionA.ForeColor = Color.Green
-                                                                                              lblConnectionA.Text = "Ba�l�"
+                                                                                              lblConnectionA.Text = "Bağlı"
                                                                                           Else
                                                                                               lblConnectionA.ForeColor = Color.Red
-                                                                                              lblConnectionA.Text = "Ba�l� De�il"
+                                                                                              lblConnectionA.Text = "Bağlı Değil"
                                                                                           End If
                                                                                       Case "B"
                                                                                           If isConnected Then
                                                                                               lblConnectionB.ForeColor = Color.Green
-                                                                                              lblConnectionB.Text = "Ba�l�"
+                                                                                              lblConnectionB.Text = "Bağlı"
                                                                                           Else
                                                                                               lblConnectionB.ForeColor = Color.Red
-                                                                                              lblConnectionB.Text = "Ba�l� De�il"
+                                                                                              lblConnectionB.Text = "Bağlı Değil"
                                                                                           End If
                                                                                       Case "C"
                                                                                           If isConnected Then
                                                                                               lblConnectionC.ForeColor = Color.Green
-                                                                                              lblConnectionC.Text = "Ba�l�"
+                                                                                              lblConnectionC.Text = "Bağlı"
                                                                                           Else
                                                                                               lblConnectionC.ForeColor = Color.Red
-                                                                                              lblConnectionC.Text = "Ba�l� De�il"
+                                                                                              lblConnectionC.Text = "Bağlı Değil"
                                                                                           End If
                                                                                   End Select
                                                                               End Sub), New Object() {})
