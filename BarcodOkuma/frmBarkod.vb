@@ -283,16 +283,26 @@ Partial Public Class frmBarkod
     End Function
 
     Private Sub OnBarcodeReceived(deviceIp As String, barcode As String)
+        ' Immediately update UI with barcode - non-blocking
         Select Case deviceIp
             Case "192.168.0.6"
-                VeriOnay(barcode, "A", txt_tartim2.Text)
                 CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub() txtBarcodeA.Text = barcode), New Object() {})
+                ' Process SAP query in background thread - non-blocking
+                Dim hat As String = "A"
+                Dim weight As String = txt_tartim2.Text
+                System.Threading.ThreadPool.QueueUserWorkItem(Sub(state) VeriOnay(barcode, hat, weight))
             Case "192.168.0.13"
-                VeriOnay(barcode, "B", txt_tartim3.Text)
                 CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub() txtBarcodeB.Text = barcode), New Object() {})
+                ' Process SAP query in background thread - non-blocking
+                Dim hat As String = "B"
+                Dim weight As String = txt_tartim3.Text
+                System.Threading.ThreadPool.QueueUserWorkItem(Sub(state) VeriOnay(barcode, hat, weight))
             Case "192.168.0.8"
-                VeriOnay(barcode, "C", txt_tartim1.Text)
                 CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub() txtBarcodeC.Text = barcode), New Object() {})
+                ' Process SAP query in background thread - non-blocking
+                Dim hat As String = "C"
+                Dim weight As String = txt_tartim1.Text
+                System.Threading.ThreadPool.QueueUserWorkItem(Sub(state) VeriOnay(barcode, hat, weight))
         End Select
     End Sub
 
