@@ -43,20 +43,38 @@ Partial Public Class frmBarkod
     ' Initialize persistent SAP connection for performance optimization
     Private Sub InitializeSAPConnection()
         Try
-            Dim wsdlurl As String = "http://sapapp.sersim.smfr.local:8000/sap/bc/srt/wsdl/flv_10002A111AD1/bndg_url/sap/bc/srt/rfc/sap/zsfr_mm_008_fm_01/100/zsfr_mm_022_fm_01/zsfr_mm_022_fm_01?sap-client=100"
-            Dim cre = New NetworkCredential("msk.services", "Sers!m2023.Prod").GetCredential(New Uri(wsdlurl), "Basic")
+            CreateSAPConnection()
             
-            SyncLock sapLock
-                sapApp = New ZSFR_MM_022_FM_01()
-                sapApp.Credentials = cre
-                sapApp.Timeout = 15000 ' 15 second timeout for SAP operations
-            End SyncLock
-            
-            ListBox1.Items.Add("SAP bağlantısı kuruldu")
+            ' Use BeginInvoke for thread-safe UI update
+            If Me.InvokeRequired Then
+                Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add("SAP bağlantısı kuruldu")))
+            Else
+                ListBox1.Items.Add("SAP bağlantısı kuruldu")
+            End If
         Catch ex As Exception
-            ListBox1.Items.Add("SAP bağlantısı kurulamadı: " & ex.Message)
-            TextBox1.Text += "SAP bağlantısı kurulamadı: " & ex.Message & vbCrLf
+            ' Use BeginInvoke for thread-safe UI update
+            If Me.InvokeRequired Then
+                Me.BeginInvoke(New Action(Sub()
+                                              ListBox1.Items.Add("SAP bağlantısı kurulamadı: " & ex.Message)
+                                              TextBox1.Text += "SAP bağlantısı kurulamadı: " & ex.Message & vbCrLf
+                                          End Sub))
+            Else
+                ListBox1.Items.Add("SAP bağlantısı kurulamadı: " & ex.Message)
+                TextBox1.Text += "SAP bağlantısı kurulamadı: " & ex.Message & vbCrLf
+            End If
         End Try
+    End Sub
+
+    ' Create or reinitialize SAP connection - shared method
+    Private Sub CreateSAPConnection()
+        Dim wsdlurl As String = "http://sapapp.sersim.smfr.local:8000/sap/bc/srt/wsdl/flv_10002A111AD1/bndg_url/sap/bc/srt/rfc/sap/zsfr_mm_008_fm_01/100/zsfr_mm_022_fm_01/zsfr_mm_022_fm_01?sap-client=100"
+        Dim cre = New NetworkCredential("msk.services", "Sers!m2023.Prod").GetCredential(New Uri(wsdlurl), "Basic")
+        
+        SyncLock sapLock
+            sapApp = New ZSFR_MM_022_FM_01()
+            sapApp.Credentials = cre
+            sapApp.Timeout = 15000 ' 15 second timeout for SAP operations
+        End SyncLock
     End Sub
 
     Sub tutorial()
@@ -200,11 +218,7 @@ Partial Public Class frmBarkod
             SyncLock sapLock
                 If sapApp Is Nothing Then
                     ' Fallback: initialize connection if not already done
-                    Dim wsdlurl As String = "http://sapapp.sersim.smfr.local:8000/sap/bc/srt/wsdl/flv_10002A111AD1/bndg_url/sap/bc/srt/rfc/sap/zsfr_mm_008_fm_01/100/zsfr_mm_022_fm_01/zsfr_mm_022_fm_01?sap-client=100"
-                    Dim cre = New NetworkCredential("msk.services", "Sers!m2023.Prod").GetCredential(New Uri(wsdlurl), "Basic")
-                    sapApp = New ZSFR_MM_022_FM_01()
-                    sapApp.Credentials = cre
-                    sapApp.Timeout = 15000
+                    CreateSAPConnection()
                 End If
                 
                 Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
