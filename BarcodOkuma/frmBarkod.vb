@@ -469,16 +469,23 @@ Partial Public Class frmBarkod
                     End SyncLock
                     
                 Case Else
-                    ' Unknown hat - log error
+                    ' Unknown hat - log error and skip processing
                     LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Unknown hat: {Hat})")
+                    Sonuc = "ERROR: Unknown Hat"
             End Select
 
-            ListBox1.Items.Add(" " + Sonuc.ToString + "   " + weight)
+            ' Thread-safe UI update
+            If Not String.IsNullOrEmpty(Sonuc) AndAlso Sonuc <> "ERROR: Unknown Hat" Then
+                Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add(" " + Sonuc.ToString + "   " + weight)))
+            End If
 
             cevap = True
         Catch ex As Exception
-            ListBox1.Items.Add(ex.ToString)
-            TextBox1.Text += ex.ToString
+            ' Thread-safe UI updates
+            Me.BeginInvoke(New Action(Sub()
+                                          ListBox1.Items.Add(ex.ToString)
+                                          TextBox1.Text += ex.ToString
+                                      End Sub))
             ' Log SAP query exception
             LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR ({ex.Message})")
 
