@@ -137,7 +137,57 @@ The SQL code **exactly matches** the format from commit 497e3a65:
 
 ## Monitoring
 
-Check `AllLogs.txt` for detailed operation tracking:
+### Comprehensive Logging (AllLog.txt)
+The system includes comprehensive logging to `AllLog.txt` with millisecond-precision timestamps. All log entries follow the format:
+```
+[YYYY-MM-DD HH:mm:ss.fff] HAT-{A|B|C} | {EVENT_TYPE} | {Details}
+```
+
+**Logged Events:**
+1. **BARCODE_RECEIVED** - Barcode read from scanner
+   - Example: `[2026-01-09 14:30:45.123] HAT-A | BARCODE_RECEIVED | Okunan Barkod: 12345ABC | IP: 192.168.0.6 | Ağırlık: 75.5`
+
+2. **SAP_CALL_START** - Before SAP web service call
+   - Example: `[2026-01-09 14:30:45.234] HAT-A | SAP_CALL_START | Barkod: 12345ABC | Ağırlık: 75.5 | Tarih: 2026-01-09`
+
+3. **SAP_RESPONSE** - Successful SAP response
+   - Example: `[2026-01-09 14:30:47.567] HAT-A | SAP_RESPONSE | Status: S | Sonuç: 456789 | Ağırlık: 75.5`
+
+4. **SAP_ERROR** - SAP call failed
+   - Example: `[2026-01-09 14:31:20.570] HAT-A | SAP_ERROR | Barkod: INVALID123 | Mesaj: Connection timeout | Stack: at System.Net...`
+
+5. **SQL_INSERT_START** - Before SQL INSERT operation
+   - Example: `[2026-01-09 14:30:47.580] HAT-A | SQL_INSERT_START | Query: INSERT INTO [SIMFER].[dbo].[AMBAR]... | Barkod: 12345ABC | Hat: A | Sonuç: 456789`
+
+6. **SQL_INSERT_SUCCESS** - SQL INSERT completed
+   - Example: `[2026-01-09 14:30:47.612] HAT-A | SQL_INSERT_SUCCESS | Rows Affected: 1`
+
+7. **SQL_INSERT_ERROR** - SQL INSERT failed
+   - Example: `[2026-01-09 14:32:10.123] HAT-C | SQL_INSERT_ERROR | Mesaj: Cannot insert duplicate key | Query: INSERT INTO...`
+
+8. **LOG_FILE_WRITE** - Writing to Barcod1/2/3.txt
+   - Example: `[2026-01-09 14:30:47.625] HAT-A | LOG_FILE_WRITE | File: Barcod1.txt | Data: 12345ABC;456789`
+
+9. **LOG_FILE_ERROR** - File write failed
+   - Example: `[2026-01-09 14:40:15.905] HAT-A | LOG_FILE_ERROR | File: Barcod1.txt | Mesaj: File is being used by another process`
+
+10. **PROCESS_COMPLETE** - End-to-end processing complete
+    - Example: `[2026-01-09 14:30:47.650] HAT-A | PROCESS_COMPLETE | Barkod: 12345ABC | Sonuç: Başarılı | Süre: 2527ms`
+
+11. **ERROR** - General errors
+    - Example: `[2026-01-09 14:31:05.555] HAT-A | ERROR | Tür: Connection Error | Mesaj: Unable to connect to remote server`
+
+12. **CONNECTION_STATUS** - Barcode reader connection state
+    - Example: `[2026-01-09 14:33:00.001] HAT-A | CONNECTION_STATUS | HAT: A | Status: Bağlı | Adres: 192.168.0.6:2112`
+
+**File Management:**
+- Location: `{Application.StartupPath}\LOG\AllLog.txt`
+- Thread-safe async writes via ThreadPool
+- Automatic rotation at 50MB (rotated files: `AllLog_yyyyMMdd_HHmmss.txt`)
+- Non-blocking I/O (silent fail on errors to avoid production impact)
+
+### Legacy Logging (AllLogs.txt)
+Check `AllLogs.txt` for backward-compatible operation tracking:
 - `SAP: OK` - Successful SAP query
 - `SAP: ERROR` - SAP query failure
 - `SQL Insert: OK` - Successful database insert
@@ -173,10 +223,24 @@ Check `AllLogs.txt` for detailed operation tracking:
 ### SQL insert failures
 - Check connection string in Database.vb
 - Verify SQL Server is accessible
-- Check AllLogs.txt for specific error messages
+- Check AllLog.txt for SQL_INSERT_ERROR events with specific error messages
+- Check AllLogs.txt for legacy error tracking
 
 ### Slow processing
 - Check queue sizes (should remain small)
 - Monitor CPU usage
-- Check SAP response times
+- Check SAP response times in AllLog.txt (look for time between SAP_CALL_START and SAP_RESPONSE)
 - Verify SQL Server performance
+- Review PROCESS_COMPLETE entries for duration metrics
+
+### Log file not created
+- Verify LOG folder exists (created automatically via Klasor_Kontrol)
+- Check write permissions on LOG folder
+- Ensure application has write access to Application.StartupPath\LOG
+- Check for file system errors in event viewer
+
+### Missing log entries
+- Verify logging is not silently failing (check application is running)
+- Ensure sufficient disk space for log files
+- Check if file rotation occurred (look for AllLog_*.txt files)
+- Review thread pool status (logging uses async threads)
