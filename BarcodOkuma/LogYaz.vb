@@ -66,7 +66,7 @@ hata:
                                                                       System.IO.File.AppendAllText(fullPath, logEntry & vbCrLf)
                                                                   End SyncLock
                                                               Catch ex As Exception
-                                                                  ' Silent fail to avoid blocking production
+                                                                  ' Silent fail for file I/O exceptions to avoid blocking production operations
                                                               End Try
                                                           End Sub)
         Catch ex As Exception

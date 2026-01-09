@@ -119,7 +119,7 @@ Partial Public Class frmBarkod
                                 End Using
                             End Using
                             ' Log successful SQL insert
-                            LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: OK ({rowsAffected} row)")
+                            LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: OK ({rowsAffected} row{If(rowsAffected <> 1, "s", "")})")
                         Catch sqlEx As Exception
                             ' Log SQL insert error
                             LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: ERROR ({sqlEx.Message})")
@@ -143,8 +143,8 @@ Partial Public Class frmBarkod
                                     fileName = "Hata.txt"
                                     LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, fileName)
                             End Select
-                            ' Log successful file write
-                            LogYaz.LogDebug(item.Hat, item.Barkod, $"Dosya Yazma: {fileName} | OK")
+                            ' Log file write attempt (actual write is async)
+                            LogYaz.LogDebug(item.Hat, item.Barkod, $"Dosya Yazma: {fileName} | Başlatıldı")
                         Catch fileEx As Exception
                             ' Log file write error
                             LogYaz.LogDebug(item.Hat, item.Barkod, $"Dosya Yazma: {fileName} | ERROR ({fileEx.Message})")
