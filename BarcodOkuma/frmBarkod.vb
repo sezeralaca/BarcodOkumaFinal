@@ -7,6 +7,7 @@ Imports System.Net.Sockets
 Imports Snap7
 Imports System.Net
 Imports BarcodOkuma.local.smfr.sersim.sapapp
+Imports System.Collections.Concurrent
 
 Partial Public Class frmBarkod
 
@@ -36,6 +37,34 @@ Partial Public Class frmBarkod
     Private sapApp As ZSFR_MM_022_FM_01 = Nothing
     Private ReadOnly sapLock As New Object()
 
+    ' Configuration constants
+    Private Const MAX_SHUTDOWN_QUEUE_ITEMS As Integer = 100  ' Max items to process during shutdown
+    Private Const QUEUE_POLL_INTERVAL_MS As Integer = 500     ' Wait time when queue is empty (ms)
+    Private Const SQL_INSERT_QUERY As String = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP]) VALUES (@Barkod, GETDATE(), @Hat, @Cevap)"
+
+    ' Data structure for queued log items
+    Private Class LogItem
+        Public Property Barkod As String
+        Public Property Hat As String
+        Public Property Agirlik As String
+        Public Property Sonuc As String
+        Public Property Cevap As Boolean
+        Public Property Tarih As DateTime
+    End Class
+
+    ' Concurrent queues for each hat (thread-safe)
+    Private queueA As New ConcurrentQueue(Of LogItem)()
+    Private queueB As New ConcurrentQueue(Of LogItem)()
+    Private queueC As New ConcurrentQueue(Of LogItem)()
+    Private queueError As New ConcurrentQueue(Of LogItem)()  ' For unexpected hat values
+
+    ' Background logger threads
+    Private loggerThreadA As Thread
+    Private loggerThreadB As Thread
+    Private loggerThreadC As Thread
+    Private loggerThreadError As Thread
+    Private loggerCancellationSource As CancellationTokenSource
+
     Public Sub New()
         InitializeComponent()
     End Sub
@@ -62,6 +91,83 @@ Partial Public Class frmBarkod
                 ListBox1.Items.Add("SAP bağlantısı kurulamadı: " & ex.Message)
                 TextBox1.Text += "SAP bağlantısı kurulamadı: " & ex.Message & vbCrLf
             End If
+        End Try
+    End Sub
+
+    ' Background logger thread - processes queue items for one hat
+    Private Sub BackgroundLoggerThread(queue As ConcurrentQueue(Of LogItem), hat As String, cancellationToken As CancellationToken)
+        Try
+            Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread başlatıldı ({hat})")))
+
+            While Not cancellationToken.IsCancellationRequested
+                Dim item As LogItem = Nothing
+                If queue.TryDequeue(item) Then
+                    Try
+                        ' Process DB write (blocking operation moved to background)
+                        ' Using parameterized query to prevent SQL injection
+                        Using conn As New System.Data.SqlClient.SqlConnection(Database.ConStr)
+                            Using cmd As New System.Data.SqlClient.SqlCommand(SQL_INSERT_QUERY, conn)
+                                cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
+                                cmd.Parameters.AddWithValue("@Hat", item.Hat)
+                                ' Store result consistently: Sonuc if success, "False" if failure
+                                cmd.Parameters.AddWithValue("@Cevap", If(item.Cevap, item.Sonuc, "False"))
+                                
+                                conn.Open()
+                                cmd.ExecuteNonQuery()
+                            End Using
+                        End Using
+
+                        ' Process file write (non-blocking)
+                        Select Case item.Hat
+                            Case "A"
+                                LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, "Barcod1.txt")
+                            Case "B"
+                                LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, "Barcod2.txt")
+                            Case "C"
+                                LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, "Barcod3.txt")
+                            Case Else
+                                LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, "Hata.txt")
+                        End Select
+
+                    Catch ex As Exception
+                        Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger hatası ({hat}) - Barkod: {item.Barkod}: {ex.Message}")))
+                    End Try
+                Else
+                    ' Queue is empty, wait a bit before checking again (reduced CPU usage)
+                    ' Use Task.Delay for proper cancellation support
+                    Try
+                        System.Threading.Tasks.Task.Delay(QUEUE_POLL_INTERVAL_MS, cancellationToken).Wait()
+                    Catch ex As AggregateException
+                        ' Expected when cancellation is requested
+                    End Try
+                End If
+            End While
+
+        Catch ex As Exception
+            Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread hatası ({hat}): {ex.Message}")))
+        Finally
+            ' Process remaining items in queue before shutdown
+            Dim item As LogItem = Nothing
+            Dim shutdownProcessedCount As Integer = 0
+            While queue.TryDequeue(item) AndAlso shutdownProcessedCount < MAX_SHUTDOWN_QUEUE_ITEMS
+                Try
+                    ' Quick processing of remaining items
+                    Using conn As New System.Data.SqlClient.SqlConnection(Database.ConStr)
+                        Using cmd As New System.Data.SqlClient.SqlCommand(SQL_INSERT_QUERY, conn)
+                            cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
+                            cmd.Parameters.AddWithValue("@Hat", item.Hat)
+                            cmd.Parameters.AddWithValue("@Cevap", If(item.Cevap, item.Sonuc, "False"))
+                            conn.Open()
+                            cmd.ExecuteNonQuery()
+                        End Using
+                    End Using
+                    shutdownProcessedCount += 1
+                Catch ex As Exception
+                    ' Silently fail during shutdown to avoid blocking
+                End Try
+            End While
+            
+            Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread sonlandırıldı ({hat}) - Kalan {shutdownProcessedCount} kayıt işlendi")))
         End Try
     End Sub
 
@@ -160,10 +266,13 @@ Partial Public Class frmBarkod
 
     Private Sub Window_FormClosing(ByVal sender As Object, ByVal e As System.Windows.Forms.FormClosingEventArgs) Handles Me.FormClosing
         Try
-            ' Cancel all threads
+            ' Cancel all barcode reader threads
             If cancellationSourceA IsNot Nothing Then cancellationSourceA.Cancel()
             If cancellationSourceB IsNot Nothing Then cancellationSourceB.Cancel()
             If cancellationSourceC IsNot Nothing Then cancellationSourceC.Cancel()
+
+            ' Cancel logger threads
+            If loggerCancellationSource IsNot Nothing Then loggerCancellationSource.Cancel()
 
             If port1.IsOpen Then port1.Close()
             If port2.IsOpen Then port2.Close()
@@ -180,10 +289,17 @@ Partial Public Class frmBarkod
             If threadB IsNot Nothing AndAlso threadB.IsAlive Then threadB.Join(1000)
             If threadC IsNot Nothing AndAlso threadC.IsAlive Then threadC.Join(1000)
 
+            ' Wait for logger threads to finish processing remaining queue items (longer timeout)
+            If loggerThreadA IsNot Nothing AndAlso loggerThreadA.IsAlive Then loggerThreadA.Join(5000)
+            If loggerThreadB IsNot Nothing AndAlso loggerThreadB.IsAlive Then loggerThreadB.Join(5000)
+            If loggerThreadC IsNot Nothing AndAlso loggerThreadC.IsAlive Then loggerThreadC.Join(5000)
+            If loggerThreadError IsNot Nothing AndAlso loggerThreadError.IsAlive Then loggerThreadError.Join(5000)
+
             ' Dispose cancellation sources
             If cancellationSourceA IsNot Nothing Then cancellationSourceA.Dispose()
             If cancellationSourceB IsNot Nothing Then cancellationSourceB.Dispose()
             If cancellationSourceC IsNot Nothing Then cancellationSourceC.Dispose()
+            If loggerCancellationSource IsNot Nothing Then loggerCancellationSource.Dispose()
 
             ' Dispose SAP connection
             SyncLock sapLock
@@ -244,33 +360,30 @@ Partial Public Class frmBarkod
 
         End Try
 
+        ' Queue the result for background processing (non-blocking)
+        Dim logItem As New LogItem With {
+            .Barkod = Barkod,
+            .Hat = Hat,
+            .Agirlik = agirlik,
+            .Sonuc = Sonuc,
+            .Cevap = cevap,
+            .Tarih = DateTime.Now
+        }
 
-        Dim sqlstr As String
-
-        sqlstr = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP])  VALUES ( "
-        sqlstr = sqlstr & "'" & Barkod & "', GETDATE(),"
-        sqlstr = sqlstr & "'" & Hat & "',"
-        If cevap = True Then
-            sqlstr = sqlstr & "'" & Sonuc & "')"
-        Else
-            sqlstr = sqlstr & "'" & cevap & "')"
-        End If
-
-        Dim RET As Integer
-        RET = Connect_DB_Execute(sqlstr, enumDbType.Sql)
-
+        ' Enqueue to appropriate hat queue
         Select Case Hat
             Case "A"
-                LogYaz.LogTutGenericAsync(Barkod & ";" & Sonuc, DosyaPath, "Barcod1.txt")
+                queueA.Enqueue(logItem)
             Case "B"
-                LogYaz.LogTutGenericAsync(Barkod & ";" & Sonuc, DosyaPath, "Barcod2.txt")
+                queueB.Enqueue(logItem)
             Case "C"
-                LogYaz.LogTutGenericAsync(Barkod & ";" & Sonuc, DosyaPath, "Barcod3.txt")
+                queueC.Enqueue(logItem)
             Case Else
-                LogYaz.LogTutGeneric(Barkod & ";" & Sonuc, DosyaPath, "Hata.txt")
-
+                ' Handle unexpected hat values with error queue (non-blocking)
+                queueError.Enqueue(logItem)
         End Select
 
+        ' Return immediately - background thread will process DB and file writes
 
     End Sub
 
@@ -498,6 +611,32 @@ Partial Public Class frmBarkod
 
         ' Initialize persistent SAP connection for performance
         InitializeSAPConnection()
+
+        ' Start background logger threads for parallel processing
+        Try
+            loggerCancellationSource = New CancellationTokenSource()
+            
+            loggerThreadA = New Thread(Sub() BackgroundLoggerThread(queueA, "A", loggerCancellationSource.Token))
+            loggerThreadA.IsBackground = True
+            loggerThreadA.Start()
+
+            loggerThreadB = New Thread(Sub() BackgroundLoggerThread(queueB, "B", loggerCancellationSource.Token))
+            loggerThreadB.IsBackground = True
+            loggerThreadB.Start()
+
+            loggerThreadC = New Thread(Sub() BackgroundLoggerThread(queueC, "C", loggerCancellationSource.Token))
+            loggerThreadC.IsBackground = True
+            loggerThreadC.Start()
+
+            loggerThreadError = New Thread(Sub() BackgroundLoggerThread(queueError, "Error", loggerCancellationSource.Token))
+            loggerThreadError.IsBackground = True
+            loggerThreadError.Start()
+
+            ListBox1.Items.Add("Background logger threads başlatıldı (A, B, C, Error)")
+        Catch ex As Exception
+            ListBox1.Items.Add("Logger thread başlatma hatası: " & ex.ToString)
+            TextBox1.Text += "Logger thread başlatma hatası: " & ex.ToString & vbCrLf
+        End Try
 
         Timer4.Start()
 
