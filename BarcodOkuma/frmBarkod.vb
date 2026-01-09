@@ -40,6 +40,7 @@ Partial Public Class frmBarkod
     ' Configuration constants
     Private Const MAX_SHUTDOWN_QUEUE_ITEMS As Integer = 100  ' Max items to process during shutdown
     Private Const QUEUE_POLL_INTERVAL_MS As Integer = 500     ' Wait time when queue is empty (ms)
+    Private Const SQL_INSERT_QUERY As String = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP]) VALUES (@Barkod, GETDATE(), @Hat, @Cevap)"
 
     ' Data structure for queued log items
     Private Class LogItem
@@ -104,10 +105,8 @@ Partial Public Class frmBarkod
                     Try
                         ' Process DB write (blocking operation moved to background)
                         ' Using parameterized query to prevent SQL injection
-                        Dim sqlstr As String = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP]) VALUES (@Barkod, GETDATE(), @Hat, @Cevap)"
-                        
                         Using conn As New System.Data.SqlClient.SqlConnection(Database.ConStr)
-                            Using cmd As New System.Data.SqlClient.SqlCommand(sqlstr, conn)
+                            Using cmd As New System.Data.SqlClient.SqlCommand(SQL_INSERT_QUERY, conn)
                                 cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
                                 cmd.Parameters.AddWithValue("@Hat", item.Hat)
                                 ' Store result consistently: Sonuc if success, "False" if failure
@@ -115,7 +114,6 @@ Partial Public Class frmBarkod
                                 
                                 conn.Open()
                                 cmd.ExecuteNonQuery()
-                                conn.Close()
                             End Using
                         End Using
 
@@ -136,7 +134,12 @@ Partial Public Class frmBarkod
                     End Try
                 Else
                     ' Queue is empty, wait a bit before checking again (reduced CPU usage)
-                    cancellationToken.WaitHandle.WaitOne(QUEUE_POLL_INTERVAL_MS)
+                    ' Use Task.Delay for proper cancellation support
+                    Try
+                        System.Threading.Tasks.Task.Delay(QUEUE_POLL_INTERVAL_MS, cancellationToken).Wait()
+                    Catch ex As AggregateException
+                        ' Expected when cancellation is requested
+                    End Try
                 End If
             End While
 
@@ -145,28 +148,26 @@ Partial Public Class frmBarkod
         Finally
             ' Process remaining items in queue before shutdown
             Dim item As LogItem = Nothing
-            Dim processedCount As Integer = 0
-            While queue.TryDequeue(item) AndAlso processedCount < MAX_SHUTDOWN_QUEUE_ITEMS
+            Dim shutdownProcessedCount As Integer = 0
+            While queue.TryDequeue(item) AndAlso shutdownProcessedCount < MAX_SHUTDOWN_QUEUE_ITEMS
                 Try
                     ' Quick processing of remaining items
-                    Dim sqlstr As String = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP]) VALUES (@Barkod, GETDATE(), @Hat, @Cevap)"
                     Using conn As New System.Data.SqlClient.SqlConnection(Database.ConStr)
-                        Using cmd As New System.Data.SqlClient.SqlCommand(sqlstr, conn)
+                        Using cmd As New System.Data.SqlClient.SqlCommand(SQL_INSERT_QUERY, conn)
                             cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
                             cmd.Parameters.AddWithValue("@Hat", item.Hat)
                             cmd.Parameters.AddWithValue("@Cevap", If(item.Cevap, item.Sonuc, "False"))
                             conn.Open()
                             cmd.ExecuteNonQuery()
-                            conn.Close()
                         End Using
                     End Using
-                    processedCount += 1
+                    shutdownProcessedCount += 1
                 Catch ex As Exception
                     ' Silently fail during shutdown to avoid blocking
                 End Try
             End While
             
-            Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread sonlandırıldı ({hat}) - Kalan {processedCount} kayıt işlendi")))
+            Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread sonlandırıldı ({hat}) - Kalan {shutdownProcessedCount} kayıt işlendi")))
         End Try
     End Sub
 
