@@ -44,7 +44,6 @@ Partial Public Class frmBarkod
     ' Configuration constants
     Private Const MAX_SHUTDOWN_QUEUE_ITEMS As Integer = 100  ' Max items to process during shutdown
     Private Const QUEUE_POLL_INTERVAL_MS As Integer = 500     ' Wait time when queue is empty (ms)
-    Private Const SQL_INSERT_QUERY As String = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP]) VALUES (@Barkod, GETDATE(), @Hat, @Cevap)"
 
     ' Data structure for queued log items
     Private Class LogItem
@@ -101,6 +100,28 @@ Partial Public Class frmBarkod
         End Try
     End Sub
 
+    ' Helper function to escape single quotes for SQL string concatenation (prevent SQL injection)
+    Private Function SqlEscape(value As String) As String
+        If String.IsNullOrEmpty(value) Then
+            Return ""
+        End If
+        Return value.Replace("'", "''")
+    End Function
+
+    ' Build SQL INSERT statement using exact format from 497e3a65 commit
+    Private Function BuildSqlInsertStatement(item As LogItem) As String
+        Dim sqlstr As String
+        sqlstr = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP])  VALUES ( "
+        sqlstr = sqlstr & "'" & SqlEscape(item.Barkod) & "', GETDATE(),"
+        sqlstr = sqlstr & "'" & SqlEscape(item.Hat) & "',"
+        If item.Cevap Then
+            sqlstr = sqlstr & "'" & SqlEscape(item.Sonuc) & "')"
+        Else
+            sqlstr = sqlstr & "'False')"
+        End If
+        Return sqlstr
+    End Function
+
     ' Background logger thread - processes queue items for one hat
     Private Sub BackgroundLoggerThread(queue As ConcurrentQueue(Of LogItem), hat As String, cancellationToken As CancellationToken)
         Try
@@ -111,22 +132,14 @@ Partial Public Class frmBarkod
                 If queue.TryDequeue(item) Then
                     Try
                         ' Process DB write (blocking operation moved to background)
-                        ' Using parameterized query to prevent SQL injection
-                        Dim rowsAffected As Integer = 0
+                        ' Using exact SQL format from 497e3a65 commit with Connect_DB_Execute
+                        Dim RET As Integer = 0
                         Try
-                            Using conn As New System.Data.SqlClient.SqlConnection(Database.ConStr)
-                                Using cmd As New System.Data.SqlClient.SqlCommand(SQL_INSERT_QUERY, conn)
-                                    cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
-                                    cmd.Parameters.AddWithValue("@Hat", item.Hat)
-                                    ' Store result consistently: Sonuc if success, "False" if failure
-                                    cmd.Parameters.AddWithValue("@Cevap", If(item.Cevap, item.Sonuc, "False"))
-                                    
-                                    conn.Open()
-                                    rowsAffected = cmd.ExecuteNonQuery()
-                                End Using
-                            End Using
+                            Dim sqlstr As String = BuildSqlInsertStatement(item)
+                            RET = Connect_DB_Execute(sqlstr, enumDbType.Sql)
+                            
                             ' Log successful SQL insert
-                            LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: OK ({rowsAffected} row{If(rowsAffected <> 1, "s", "")})")
+                            LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: OK (RET={RET})")
                         Catch sqlEx As Exception
                             ' Log SQL insert error
                             LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: ERROR ({sqlEx.Message})")
@@ -179,16 +192,9 @@ Partial Public Class frmBarkod
             Dim shutdownProcessedCount As Integer = 0
             While queue.TryDequeue(item) AndAlso shutdownProcessedCount < MAX_SHUTDOWN_QUEUE_ITEMS
                 Try
-                    ' Quick processing of remaining items
-                    Using conn As New System.Data.SqlClient.SqlConnection(Database.ConStr)
-                        Using cmd As New System.Data.SqlClient.SqlCommand(SQL_INSERT_QUERY, conn)
-                            cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
-                            cmd.Parameters.AddWithValue("@Hat", item.Hat)
-                            cmd.Parameters.AddWithValue("@Cevap", If(item.Cevap, item.Sonuc, "False"))
-                            conn.Open()
-                            cmd.ExecuteNonQuery()
-                        End Using
-                    End Using
+                    ' Quick processing of remaining items using exact SQL format from 497e3a65
+                    Dim sqlstr As String = BuildSqlInsertStatement(item)
+                    Dim RET As Integer = Connect_DB_Execute(sqlstr, enumDbType.Sql)
                     shutdownProcessedCount += 1
                 Catch ex As Exception
                     ' Silently fail during shutdown to avoid blocking
