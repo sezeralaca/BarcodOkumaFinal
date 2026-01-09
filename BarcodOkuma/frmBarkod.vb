@@ -37,6 +37,10 @@ Partial Public Class frmBarkod
     Private sapApp As ZSFR_MM_022_FM_01 = Nothing
     Private ReadOnly sapLock As New Object()
 
+    ' Configuration constants
+    Private Const MAX_SHUTDOWN_QUEUE_ITEMS As Integer = 100  ' Max items to process during shutdown
+    Private Const QUEUE_POLL_INTERVAL_MS As Integer = 500     ' Wait time when queue is empty (ms)
+
     ' Data structure for queued log items
     Private Class LogItem
         Public Property Barkod As String
@@ -51,11 +55,13 @@ Partial Public Class frmBarkod
     Private queueA As New ConcurrentQueue(Of LogItem)()
     Private queueB As New ConcurrentQueue(Of LogItem)()
     Private queueC As New ConcurrentQueue(Of LogItem)()
+    Private queueError As New ConcurrentQueue(Of LogItem)()  ' For unexpected hat values
 
     ' Background logger threads
     Private loggerThreadA As Thread
     Private loggerThreadB As Thread
     Private loggerThreadC As Thread
+    Private loggerThreadError As Thread
     Private loggerCancellationSource As CancellationTokenSource
 
     Public Sub New()
@@ -104,11 +110,8 @@ Partial Public Class frmBarkod
                             Using cmd As New System.Data.SqlClient.SqlCommand(sqlstr, conn)
                                 cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
                                 cmd.Parameters.AddWithValue("@Hat", item.Hat)
-                                If item.Cevap Then
-                                    cmd.Parameters.AddWithValue("@Cevap", item.Sonuc)
-                                Else
-                                    cmd.Parameters.AddWithValue("@Cevap", item.Cevap.ToString())
-                                End If
+                                ' Store result consistently: Sonuc if success, "False" if failure
+                                cmd.Parameters.AddWithValue("@Cevap", If(item.Cevap, item.Sonuc, "False"))
                                 
                                 conn.Open()
                                 cmd.ExecuteNonQuery()
@@ -124,6 +127,8 @@ Partial Public Class frmBarkod
                                 LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, "Barcod2.txt")
                             Case "C"
                                 LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, "Barcod3.txt")
+                            Case Else
+                                LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, "Hata.txt")
                         End Select
 
                     Catch ex As Exception
@@ -131,7 +136,7 @@ Partial Public Class frmBarkod
                     End Try
                 Else
                     ' Queue is empty, wait a bit before checking again (reduced CPU usage)
-                    cancellationToken.WaitHandle.WaitOne(500)
+                    cancellationToken.WaitHandle.WaitOne(QUEUE_POLL_INTERVAL_MS)
                 End If
             End While
 
@@ -141,7 +146,7 @@ Partial Public Class frmBarkod
             ' Process remaining items in queue before shutdown
             Dim item As LogItem = Nothing
             Dim processedCount As Integer = 0
-            While queue.TryDequeue(item) AndAlso processedCount < 100
+            While queue.TryDequeue(item) AndAlso processedCount < MAX_SHUTDOWN_QUEUE_ITEMS
                 Try
                     ' Quick processing of remaining items
                     Dim sqlstr As String = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP]) VALUES (@Barkod, GETDATE(), @Hat, @Cevap)"
@@ -149,7 +154,7 @@ Partial Public Class frmBarkod
                         Using cmd As New System.Data.SqlClient.SqlCommand(sqlstr, conn)
                             cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
                             cmd.Parameters.AddWithValue("@Hat", item.Hat)
-                            cmd.Parameters.AddWithValue("@Cevap", If(item.Cevap, item.Sonuc, item.Cevap.ToString()))
+                            cmd.Parameters.AddWithValue("@Cevap", If(item.Cevap, item.Sonuc, "False"))
                             conn.Open()
                             cmd.ExecuteNonQuery()
                             conn.Close()
@@ -287,6 +292,7 @@ Partial Public Class frmBarkod
             If loggerThreadA IsNot Nothing AndAlso loggerThreadA.IsAlive Then loggerThreadA.Join(5000)
             If loggerThreadB IsNot Nothing AndAlso loggerThreadB.IsAlive Then loggerThreadB.Join(5000)
             If loggerThreadC IsNot Nothing AndAlso loggerThreadC.IsAlive Then loggerThreadC.Join(5000)
+            If loggerThreadError IsNot Nothing AndAlso loggerThreadError.IsAlive Then loggerThreadError.Join(5000)
 
             ' Dispose cancellation sources
             If cancellationSourceA IsNot Nothing Then cancellationSourceA.Dispose()
@@ -372,8 +378,8 @@ Partial Public Class frmBarkod
             Case "C"
                 queueC.Enqueue(logItem)
             Case Else
-                ' Fallback for unexpected hat - use synchronous logging
-                LogYaz.LogTutGeneric(Barkod & ";" & Sonuc, DosyaPath, "Hata.txt")
+                ' Handle unexpected hat values with error queue (non-blocking)
+                queueError.Enqueue(logItem)
         End Select
 
         ' Return immediately - background thread will process DB and file writes
@@ -621,7 +627,11 @@ Partial Public Class frmBarkod
             loggerThreadC.IsBackground = True
             loggerThreadC.Start()
 
-            ListBox1.Items.Add("Background logger threads başlatıldı (A, B, C)")
+            loggerThreadError = New Thread(Sub() BackgroundLoggerThread(queueError, "Error", loggerCancellationSource.Token))
+            loggerThreadError.IsBackground = True
+            loggerThreadError.Start()
+
+            ListBox1.Items.Add("Background logger threads başlatıldı (A, B, C, Error)")
         Catch ex As Exception
             ListBox1.Items.Add("Logger thread başlatma hatası: " & ex.ToString)
             TextBox1.Text += "Logger thread başlatma hatası: " & ex.ToString & vbCrLf
