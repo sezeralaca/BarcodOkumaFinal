@@ -1,6 +1,7 @@
 ﻿Imports System
 Imports System.IO
 Imports System.IO.File
+Imports System.Windows.Forms
 
 
 Module LogYaz

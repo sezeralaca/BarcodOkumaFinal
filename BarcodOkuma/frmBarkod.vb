@@ -147,8 +147,8 @@ Partial Public Class frmBarkod
                         ' Process DB write (blocking operation moved to background)
                         ' Using exact SQL format from 497e3a65 commit with Connect_DB_Execute
                         Dim RET As Integer = 0
+                        Dim sqlstr As String = BuildSqlInsertStatement(item)
                         Try
-                            Dim sqlstr As String = BuildSqlInsertStatement(item)
                             ' Log SQL insert start (using helper for preview)
                             Dim sqlPreview As String = GetSqlPreview(sqlstr)
                             LogYaz.LogAllOperations(item.Hat, "SQL_INSERT_START", $"Query: {sqlPreview} | Barkod: {item.Barkod} | Hat: {item.Hat} | Sonuç: {item.Sonuc}")
@@ -161,7 +161,7 @@ Partial Public Class frmBarkod
                             LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: OK (RET={RET})")
                         Catch sqlEx As Exception
                             ' Log SQL insert error (using helper for preview)
-                            Dim sqlPreview As String = GetSqlPreview(BuildSqlInsertStatement(item))
+                            Dim sqlPreview As String = GetSqlPreview(sqlstr)
                             LogYaz.LogAllOperations(item.Hat, "SQL_INSERT_ERROR", $"Mesaj: {sqlEx.Message} | Query: {sqlPreview}")
                             ' Legacy log for backward compatibility
                             LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: ERROR ({sqlEx.Message})")
@@ -538,8 +538,15 @@ Partial Public Class frmBarkod
                                           ListBox1.Items.Add(ex.ToString)
                                           TextBox1.Text += ex.ToString
                                       End Sub))
-            ' Log SAP exception with stack trace (using constant for length)
-            Dim stackTrace As String = If(ex.StackTrace?.Length > MAX_STACK_TRACE_LENGTH, ex.StackTrace.Substring(0, MAX_STACK_TRACE_LENGTH), ex.StackTrace)
+            ' Log SAP exception with stack trace (using constant for length, safe null handling)
+            Dim stackTrace As String = ""
+            If ex.StackTrace IsNot Nothing Then
+                If ex.StackTrace.Length > MAX_STACK_TRACE_LENGTH Then
+                    stackTrace = ex.StackTrace.Substring(0, MAX_STACK_TRACE_LENGTH)
+                Else
+                    stackTrace = ex.StackTrace
+                End If
+            End If
             LogYaz.LogAllOperations(Hat, "SAP_ERROR", $"Barkod: {Barkod} | Mesaj: {ex.Message} | Stack: {stackTrace}")
             ' Legacy log for backward compatibility
             LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR ({ex.Message})")
