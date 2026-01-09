@@ -108,6 +108,20 @@ Partial Public Class frmBarkod
         Return value.Replace("'", "''")
     End Function
 
+    ' Build SQL INSERT statement using exact format from 497e3a65 commit
+    Private Function BuildSqlInsertStatement(item As LogItem) As String
+        Dim sqlstr As String
+        sqlstr = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP])  VALUES ( "
+        sqlstr = sqlstr & "'" & SqlEscape(item.Barkod) & "', GETDATE(),"
+        sqlstr = sqlstr & "'" & SqlEscape(item.Hat) & "',"
+        If item.Cevap Then
+            sqlstr = sqlstr & "'" & SqlEscape(item.Sonuc) & "')"
+        Else
+            sqlstr = sqlstr & "'False')"
+        End If
+        Return sqlstr
+    End Function
+
     ' Background logger thread - processes queue items for one hat
     Private Sub BackgroundLoggerThread(queue As ConcurrentQueue(Of LogItem), hat As String, cancellationToken As CancellationToken)
         Try
@@ -121,15 +135,7 @@ Partial Public Class frmBarkod
                         ' Using exact SQL format from 497e3a65 commit with Connect_DB_Execute
                         Dim RET As Integer = 0
                         Try
-                            Dim sqlstr As String
-                            sqlstr = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP])  VALUES ( "
-                            sqlstr = sqlstr & "'" & SqlEscape(item.Barkod) & "', GETDATE(),"
-                            sqlstr = sqlstr & "'" & SqlEscape(item.Hat) & "',"
-                            If item.Cevap = True Then
-                                sqlstr = sqlstr & "'" & SqlEscape(item.Sonuc) & "')"
-                            Else
-                                sqlstr = sqlstr & "'False')"
-                            End If
+                            Dim sqlstr As String = BuildSqlInsertStatement(item)
                             RET = Connect_DB_Execute(sqlstr, enumDbType.Sql)
                             
                             ' Log successful SQL insert
@@ -187,15 +193,7 @@ Partial Public Class frmBarkod
             While queue.TryDequeue(item) AndAlso shutdownProcessedCount < MAX_SHUTDOWN_QUEUE_ITEMS
                 Try
                     ' Quick processing of remaining items using exact SQL format from 497e3a65
-                    Dim sqlstr As String
-                    sqlstr = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP])  VALUES ( "
-                    sqlstr = sqlstr & "'" & SqlEscape(item.Barkod) & "', GETDATE(),"
-                    sqlstr = sqlstr & "'" & SqlEscape(item.Hat) & "',"
-                    If item.Cevap = True Then
-                        sqlstr = sqlstr & "'" & SqlEscape(item.Sonuc) & "')"
-                    Else
-                        sqlstr = sqlstr & "'False')"
-                    End If
+                    Dim sqlstr As String = BuildSqlInsertStatement(item)
                     Dim RET As Integer = Connect_DB_Execute(sqlstr, enumDbType.Sql)
                     shutdownProcessedCount += 1
                 Catch ex As Exception
