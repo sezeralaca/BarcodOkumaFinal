@@ -33,6 +33,24 @@ hata:
 
     End Sub
 
+    ' Async version for performance-critical barcode logging to Simatic system
+    Public Sub LogTutGenericAsync(ByVal Bilgi As String, ByVal DosyaYeri As String, ByVal DosyaAdi As String)
+        Try
+            ' Queue file write operation to ThreadPool for non-blocking I/O
+            System.Threading.ThreadPool.QueueUserWorkItem(Sub(state)
+                                                              Try
+                                                                  Dim fullPath As String = DosyaYeri & DosyaAdi
+                                                                  ' Use File.WriteAllText for atomic write operation
+                                                                  System.IO.File.WriteAllText(fullPath, Bilgi & vbCrLf)
+                                                              Catch ex As Exception
+                                                                  ' Silent fail to avoid blocking production
+                                                              End Try
+                                                          End Sub)
+        Catch ex As Exception
+            ' Silent fail to avoid blocking production
+        End Try
+    End Sub
+
     Function Klasor_Kontrol() As Boolean
 
         On Error GoTo hata

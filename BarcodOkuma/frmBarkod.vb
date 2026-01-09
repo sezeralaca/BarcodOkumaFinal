@@ -32,8 +32,49 @@ Partial Public Class frmBarkod
     Private cancellationSourceB As Threading.CancellationTokenSource
     Private cancellationSourceC As Threading.CancellationTokenSource
 
+    ' Persistent SAP connection for performance optimization
+    Private sapApp As ZSFR_MM_022_FM_01 = Nothing
+    Private ReadOnly sapLock As New Object()
+
     Public Sub New()
         InitializeComponent()
+    End Sub
+
+    ' Initialize persistent SAP connection for performance optimization
+    Private Sub InitializeSAPConnection()
+        Try
+            CreateSAPConnection()
+            
+            ' Use BeginInvoke for thread-safe UI update
+            If Me.InvokeRequired Then
+                Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add("SAP bağlantısı kuruldu")))
+            Else
+                ListBox1.Items.Add("SAP bağlantısı kuruldu")
+            End If
+        Catch ex As Exception
+            ' Use BeginInvoke for thread-safe UI update
+            If Me.InvokeRequired Then
+                Me.BeginInvoke(New Action(Sub()
+                                              ListBox1.Items.Add("SAP bağlantısı kurulamadı: " & ex.Message)
+                                              TextBox1.Text += "SAP bağlantısı kurulamadı: " & ex.Message & vbCrLf
+                                          End Sub))
+            Else
+                ListBox1.Items.Add("SAP bağlantısı kurulamadı: " & ex.Message)
+                TextBox1.Text += "SAP bağlantısı kurulamadı: " & ex.Message & vbCrLf
+            End If
+        End Try
+    End Sub
+
+    ' Create or reinitialize SAP connection - shared method
+    Private Sub CreateSAPConnection()
+        Dim wsdlurl As String = "http://sapapp.sersim.smfr.local:8000/sap/bc/srt/wsdl/flv_10002A111AD1/bndg_url/sap/bc/srt/rfc/sap/zsfr_mm_008_fm_01/100/zsfr_mm_022_fm_01/zsfr_mm_022_fm_01?sap-client=100"
+        Dim cre = New NetworkCredential("msk.services", "Sers!m2023.Prod").GetCredential(New Uri(wsdlurl), "Basic")
+        
+        SyncLock sapLock
+            sapApp = New ZSFR_MM_022_FM_01()
+            sapApp.Credentials = cre
+            sapApp.Timeout = 15000 ' 15 second timeout for SAP operations
+        End SyncLock
     End Sub
 
     Sub tutorial()
@@ -143,6 +184,14 @@ Partial Public Class frmBarkod
             If cancellationSourceA IsNot Nothing Then cancellationSourceA.Dispose()
             If cancellationSourceB IsNot Nothing Then cancellationSourceB.Dispose()
             If cancellationSourceC IsNot Nothing Then cancellationSourceC.Dispose()
+
+            ' Dispose SAP connection
+            SyncLock sapLock
+                If sapApp IsNot Nothing Then
+                    sapApp.Dispose()
+                    sapApp = Nothing
+                End If
+            End SyncLock
         Finally
             port1.Dispose()
             port2.Dispose()
@@ -165,24 +214,26 @@ Partial Public Class frmBarkod
 
 
         Try
-
-            Dim wsdlurl As String = "http://sapapp.sersim.smfr.local:8000/sap/bc/srt/wsdl/flv_10002A111AD1/bndg_url/sap/bc/srt/rfc/sap/zsfr_mm_008_fm_01/100/zsfr_mm_022_fm_01/zsfr_mm_022_fm_01?sap-client=100"
-
-            Dim cre = New NetworkCredential("msk.services", "Sers!m2023.Prod").GetCredential(New Uri(wsdlurl), "Basic")
-            Dim sapApp As ZSFR_MM_022_FM_01 = New ZSFR_MM_022_FM_01()
-            sapApp.Credentials = cre
-            Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
-            p.AGIRLIK = weight
-            p.SERINO = Barkod
-            p.TARIH = DateTime.Now.ToString("yyyy-MM-dd")
-            Dim parray As ZSFR_MM_008_S_02() = New ZSFR_MM_008_S_02(0) {}
-            parray(0) = p
-            Dim param As ZSFR_MM_008_FM_01 = New ZSFR_MM_008_FM_01()
-            param.IT_ITEMS = parray
-            Dim result = sapApp.ZSFR_MM_008_FM_01(param)
-            If result.EV_STATUS = "S" Then
-                Sonuc = result.ET_ID(0).ZZAUFNR
-            End If
+            ' Use persistent SAP connection for performance
+            SyncLock sapLock
+                If sapApp Is Nothing Then
+                    ' Fallback: initialize connection if not already done
+                    CreateSAPConnection()
+                End If
+                
+                Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
+                p.AGIRLIK = weight
+                p.SERINO = Barkod
+                p.TARIH = DateTime.Now.ToString("yyyy-MM-dd")
+                Dim parray As ZSFR_MM_008_S_02() = New ZSFR_MM_008_S_02(0) {}
+                parray(0) = p
+                Dim param As ZSFR_MM_008_FM_01 = New ZSFR_MM_008_FM_01()
+                param.IT_ITEMS = parray
+                Dim result = sapApp.ZSFR_MM_008_FM_01(param)
+                If result.EV_STATUS = "S" Then
+                    Sonuc = result.ET_ID(0).ZZAUFNR
+                End If
+            End SyncLock
 
             ListBox1.Items.Add(" " + Sonuc.ToString + "   " + weight)
 
@@ -210,11 +261,11 @@ Partial Public Class frmBarkod
 
         Select Case Hat
             Case "A"
-                LogYaz.LogTutGeneric(Barkod & ";" & Sonuc, DosyaPath, "Barcod1.txt")
+                LogYaz.LogTutGenericAsync(Barkod & ";" & Sonuc, DosyaPath, "Barcod1.txt")
             Case "B"
-                LogYaz.LogTutGeneric(Barkod & ";" & Sonuc, DosyaPath, "Barcod2.txt")
+                LogYaz.LogTutGenericAsync(Barkod & ";" & Sonuc, DosyaPath, "Barcod2.txt")
             Case "C"
-                LogYaz.LogTutGeneric(Barkod & ";" & Sonuc, DosyaPath, "Barcod3.txt")
+                LogYaz.LogTutGenericAsync(Barkod & ";" & Sonuc, DosyaPath, "Barcod3.txt")
             Case Else
                 LogYaz.LogTutGeneric(Barkod & ";" & Sonuc, DosyaPath, "Hata.txt")
 
@@ -232,21 +283,31 @@ Partial Public Class frmBarkod
     End Function
 
     Private Sub OnBarcodeReceived(deviceIp As String, barcode As String)
+        ' Immediately update UI with barcode - non-blocking
         Select Case deviceIp
             Case "192.168.0.6"
-                VeriOnay(barcode, "A", txt_tartim2.Text)
-                CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub() txtBarcodeA.Text = barcode), New Object() {})
+                CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub() txtBarcodeA.Text = barcode), New Object() {})
+                ' Process SAP query in background thread - non-blocking
+                Dim hat As String = "A"
+                Dim weight As String = txt_tartim2.Text
+                System.Threading.ThreadPool.QueueUserWorkItem(Sub(state) VeriOnay(barcode, hat, weight))
             Case "192.168.0.13"
-                VeriOnay(barcode, "B", txt_tartim3.Text)
-                CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub() txtBarcodeB.Text = barcode), New Object() {})
+                CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub() txtBarcodeB.Text = barcode), New Object() {})
+                ' Process SAP query in background thread - non-blocking
+                Dim hat As String = "B"
+                Dim weight As String = txt_tartim3.Text
+                System.Threading.ThreadPool.QueueUserWorkItem(Sub(state) VeriOnay(barcode, hat, weight))
             Case "192.168.0.8"
-                VeriOnay(barcode, "C", txt_tartim1.Text)
-                CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub() txtBarcodeC.Text = barcode), New Object() {})
+                CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub() txtBarcodeC.Text = barcode), New Object() {})
+                ' Process SAP query in background thread - non-blocking
+                Dim hat As String = "C"
+                Dim weight As String = txt_tartim1.Text
+                System.Threading.ThreadPool.QueueUserWorkItem(Sub(state) VeriOnay(barcode, hat, weight))
         End Select
     End Sub
 
     Private Sub UpdateConnectionStatus(hat As String, isConnected As Boolean)
-        CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+        CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                   Select Case hat
                                                                                       Case "A"
                                                                                           If isConnected Then
@@ -283,7 +344,7 @@ Partial Public Class frmBarkod
 
         Try
             ' Log thread start
-            CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+            CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                        ListBox1.Items.Add($"Thread başlatıldı ({hat}): {ip}:{port}")
                                                                                    End Sub), New Object() {})
 
@@ -300,7 +361,7 @@ Partial Public Class frmBarkod
                         End If
 
                         ' Log connection attempt
-                        CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                        CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                                    ListBox1.Items.Add($"Bağlantı kuruluyor ({hat}): {ip}:{port}")
                                                                                                End Sub), New Object() {})
 
@@ -313,7 +374,7 @@ Partial Public Class frmBarkod
                         stream.ReadTimeout = System.Threading.Timeout.Infinite
 
                         UpdateConnectionStatus(hat, True)
-                        CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                        CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                                    ListBox1.Items.Add($"Bağlandı ({hat}): {ip}:{port}")
                                                                                                End Sub), New Object() {})
                     End If
@@ -326,7 +387,7 @@ Partial Public Class frmBarkod
                         Dim barcode As String = System.Text.Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim()
                         If Not String.IsNullOrWhiteSpace(barcode) Then
                             OnBarcodeReceived(ip, barcode)
-                            CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                            CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                                        ListBox1.Items.Add($"Barkod alındı ({hat}): {barcode}")
                                                                                                    End Sub), New Object() {})
                         End If
@@ -337,7 +398,7 @@ Partial Public Class frmBarkod
 
                     ' Periodic "still alive" logging
                     If DateTime.Now.Subtract(lastLogTime).TotalSeconds >= logInterval Then
-                        CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                        CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                                    ListBox1.Items.Add($"Dinleniyor ({hat}): {ip}:{port}")
                                                                                                End Sub), New Object() {})
                         lastLogTime = DateTime.Now
@@ -346,7 +407,7 @@ Partial Public Class frmBarkod
                 Catch ex As System.IO.IOException
                     ' Connection lost
                     UpdateConnectionStatus(hat, False)
-                    CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                    CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                                ListBox1.Items.Add($"Bağlantı hatası ({hat}): {ex.Message}")
                                                                                            End Sub), New Object() {})
 
@@ -372,7 +433,7 @@ Partial Public Class frmBarkod
                 Catch ex As SocketException
                     ' Network error
                     UpdateConnectionStatus(hat, False)
-                    CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                    CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                                ListBox1.Items.Add($"Ağ hatası ({hat}): {ex.Message}")
                                                                                            End Sub), New Object() {})
 
@@ -397,14 +458,14 @@ Partial Public Class frmBarkod
 
                 Catch ex As Exception
                     ' Other exceptions
-                    CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+                    CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                                ListBox1.Items.Add($"Beklenmeyen hata ({hat}): {ex.Message}")
                                                                                            End Sub), New Object() {})
                 End Try
             End While
 
         Catch ex As Exception
-            CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+            CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                        ListBox1.Items.Add($"Thread hatası ({hat}): {ex.Message}")
                                                                                    End Sub), New Object() {})
         Finally
@@ -424,7 +485,7 @@ Partial Public Class frmBarkod
             End If
 
             UpdateConnectionStatus(hat, False)
-            CType(Me, System.ComponentModel.ISynchronizeInvoke).Invoke(New Action(Sub()
+            CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                        ListBox1.Items.Add($"Thread sonlandırıldı ({hat})")
                                                                                    End Sub), New Object() {})
         End Try
@@ -434,6 +495,9 @@ Partial Public Class frmBarkod
         txt_tartim1.Text = "0"
         txt_tartim2.Text = "0"
         txt_tartim3.Text = "0"
+
+        ' Initialize persistent SAP connection for performance
+        InitializeSAPConnection()
 
         Timer4.Start()
 
