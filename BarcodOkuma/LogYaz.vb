@@ -6,6 +6,10 @@ Imports System.IO.File
 Module LogYaz
 
     Public DosyaPath As String = Application.StartupPath & "\LOG\"
+    
+    ' Constants for file management
+    Private Const MAX_LOG_FILE_SIZE As Long = 52428800 ' 50MB
+    
     Public Sub LogTut(ByVal Bilgi As String, ByVal DosyaYeri As String, Optional ByVal DosyaAdi As String = "")
         On Error GoTo hata
 
@@ -94,7 +98,7 @@ hata:
                                                                       
                                                                       ' File size management - rotate if > 50MB
                                                                       Dim fileInfo As New System.IO.FileInfo(fullPath)
-                                                                      If fileInfo.Exists AndAlso fileInfo.Length > 52428800 Then ' 50MB
+                                                                      If fileInfo.Exists AndAlso fileInfo.Length > MAX_LOG_FILE_SIZE Then
                                                                           Dim backupPath As String = DosyaPath & "AllLog_" & DateTime.Now.ToString("yyyyMMdd_HHmmss") & ".txt"
                                                                           Try
                                                                               System.IO.File.Move(fullPath, backupPath)

@@ -44,6 +44,8 @@ Partial Public Class frmBarkod
     ' Configuration constants
     Private Const MAX_SHUTDOWN_QUEUE_ITEMS As Integer = 100  ' Max items to process during shutdown
     Private Const QUEUE_POLL_INTERVAL_MS As Integer = 500     ' Wait time when queue is empty (ms)
+    Private Const SQL_PREVIEW_LENGTH As Integer = 100         ' SQL query preview length for logging
+    Private Const MAX_STACK_TRACE_LENGTH As Integer = 200     ' Stack trace truncation length for logging
 
     ' Data structure for queued log items
     Private Class LogItem
@@ -107,6 +109,17 @@ Partial Public Class frmBarkod
         End If
         Return value.Replace("'", "''")
     End Function
+    
+    ' Helper function to get SQL query preview for logging
+    Private Function GetSqlPreview(sql As String, Optional maxLength As Integer = SQL_PREVIEW_LENGTH) As String
+        If String.IsNullOrEmpty(sql) Then
+            Return ""
+        End If
+        If sql.Length > maxLength Then
+            Return sql.Substring(0, maxLength) & "..."
+        End If
+        Return sql
+    End Function
 
     ' Build SQL INSERT statement using exact format from 497e3a65 commit
     Private Function BuildSqlInsertStatement(item As LogItem) As String
@@ -136,8 +149,8 @@ Partial Public Class frmBarkod
                         Dim RET As Integer = 0
                         Try
                             Dim sqlstr As String = BuildSqlInsertStatement(item)
-                            ' Log SQL insert start (first 100 chars of query)
-                            Dim sqlPreview As String = If(sqlstr.Length > 100, sqlstr.Substring(0, 100) & "...", sqlstr)
+                            ' Log SQL insert start (using helper for preview)
+                            Dim sqlPreview As String = GetSqlPreview(sqlstr)
                             LogYaz.LogAllOperations(item.Hat, "SQL_INSERT_START", $"Query: {sqlPreview} | Barkod: {item.Barkod} | Hat: {item.Hat} | Sonuç: {item.Sonuc}")
                             
                             RET = Connect_DB_Execute(sqlstr, enumDbType.Sql)
@@ -147,8 +160,8 @@ Partial Public Class frmBarkod
                             ' Legacy log for backward compatibility
                             LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: OK (RET={RET})")
                         Catch sqlEx As Exception
-                            ' Log SQL insert error
-                            Dim sqlPreview As String = If(BuildSqlInsertStatement(item).Length > 100, BuildSqlInsertStatement(item).Substring(0, 100) & "...", BuildSqlInsertStatement(item))
+                            ' Log SQL insert error (using helper for preview)
+                            Dim sqlPreview As String = GetSqlPreview(BuildSqlInsertStatement(item))
                             LogYaz.LogAllOperations(item.Hat, "SQL_INSERT_ERROR", $"Mesaj: {sqlEx.Message} | Query: {sqlPreview}")
                             ' Legacy log for backward compatibility
                             LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: ERROR ({sqlEx.Message})")
@@ -525,8 +538,8 @@ Partial Public Class frmBarkod
                                           ListBox1.Items.Add(ex.ToString)
                                           TextBox1.Text += ex.ToString
                                       End Sub))
-            ' Log SAP exception with stack trace (first 200 chars)
-            Dim stackTrace As String = If(ex.StackTrace?.Length > 200, ex.StackTrace.Substring(0, 200), ex.StackTrace)
+            ' Log SAP exception with stack trace (using constant for length)
+            Dim stackTrace As String = If(ex.StackTrace?.Length > MAX_STACK_TRACE_LENGTH, ex.StackTrace.Substring(0, MAX_STACK_TRACE_LENGTH), ex.StackTrace)
             LogYaz.LogAllOperations(Hat, "SAP_ERROR", $"Barkod: {Barkod} | Mesaj: {ex.Message} | Stack: {stackTrace}")
             ' Legacy log for backward compatibility
             LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR ({ex.Message})")
