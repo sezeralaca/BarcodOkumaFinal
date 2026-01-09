@@ -105,29 +105,50 @@ Partial Public Class frmBarkod
                     Try
                         ' Process DB write (blocking operation moved to background)
                         ' Using parameterized query to prevent SQL injection
-                        Using conn As New System.Data.SqlClient.SqlConnection(Database.ConStr)
-                            Using cmd As New System.Data.SqlClient.SqlCommand(SQL_INSERT_QUERY, conn)
-                                cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
-                                cmd.Parameters.AddWithValue("@Hat", item.Hat)
-                                ' Store result consistently: Sonuc if success, "False" if failure
-                                cmd.Parameters.AddWithValue("@Cevap", If(item.Cevap, item.Sonuc, "False"))
-                                
-                                conn.Open()
-                                cmd.ExecuteNonQuery()
+                        Dim rowsAffected As Integer = 0
+                        Try
+                            Using conn As New System.Data.SqlClient.SqlConnection(Database.ConStr)
+                                Using cmd As New System.Data.SqlClient.SqlCommand(SQL_INSERT_QUERY, conn)
+                                    cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
+                                    cmd.Parameters.AddWithValue("@Hat", item.Hat)
+                                    ' Store result consistently: Sonuc if success, "False" if failure
+                                    cmd.Parameters.AddWithValue("@Cevap", If(item.Cevap, item.Sonuc, "False"))
+                                    
+                                    conn.Open()
+                                    rowsAffected = cmd.ExecuteNonQuery()
+                                End Using
                             End Using
-                        End Using
+                            ' Log successful SQL insert
+                            LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: OK ({rowsAffected} row)")
+                        Catch sqlEx As Exception
+                            ' Log SQL insert error
+                            LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: ERROR ({sqlEx.Message})")
+                            Throw ' Re-throw to be caught by outer catch
+                        End Try
 
                         ' Process file write (non-blocking)
-                        Select Case item.Hat
-                            Case "A"
-                                LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, "Barcod1.txt")
-                            Case "B"
-                                LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, "Barcod2.txt")
-                            Case "C"
-                                LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, "Barcod3.txt")
-                            Case Else
-                                LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, "Hata.txt")
-                        End Select
+                        Dim fileName As String = ""
+                        Try
+                            Select Case item.Hat
+                                Case "A"
+                                    fileName = "Barcod1.txt"
+                                    LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, fileName)
+                                Case "B"
+                                    fileName = "Barcod2.txt"
+                                    LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, fileName)
+                                Case "C"
+                                    fileName = "Barcod3.txt"
+                                    LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, fileName)
+                                Case Else
+                                    fileName = "Hata.txt"
+                                    LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, fileName)
+                            End Select
+                            ' Log successful file write
+                            LogYaz.LogDebug(item.Hat, item.Barkod, $"Dosya Yazma: {fileName} | OK")
+                        Catch fileEx As Exception
+                            ' Log file write error
+                            LogYaz.LogDebug(item.Hat, item.Barkod, $"Dosya Yazma: {fileName} | ERROR ({fileEx.Message})")
+                        End Try
 
                     Catch ex As Exception
                         Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger hatası ({hat}) - Barkod: {item.Barkod}: {ex.Message}")))
@@ -348,6 +369,11 @@ Partial Public Class frmBarkod
                 Dim result = sapApp.ZSFR_MM_008_FM_01(param)
                 If result.EV_STATUS = "S" Then
                     Sonuc = result.ET_ID(0).ZZAUFNR
+                    ' Log successful SAP query
+                    LogYaz.LogDebug(Hat, Barkod, $"SAP: OK (Sonuç: {Sonuc})")
+                Else
+                    ' Log SAP query with non-success status
+                    LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Status: {result.EV_STATUS})")
                 End If
             End SyncLock
 
@@ -357,6 +383,8 @@ Partial Public Class frmBarkod
         Catch ex As Exception
             ListBox1.Items.Add(ex.ToString)
             TextBox1.Text += ex.ToString
+            ' Log SAP query exception
+            LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR ({ex.Message})")
 
         End Try
 

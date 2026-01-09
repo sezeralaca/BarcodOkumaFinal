@@ -51,6 +51,29 @@ hata:
         End Try
     End Sub
 
+    ' Debug logging method for AllLogs.txt - tracks all operations with timestamps
+    Public Sub LogDebug(ByVal Hat As String, ByVal Barkod As String, ByVal Mesaj As String)
+        Try
+            ' Queue file write operation to ThreadPool for non-blocking I/O
+            System.Threading.ThreadPool.QueueUserWorkItem(Sub(state)
+                                                              Try
+                                                                  Dim fullPath As String = DosyaPath & "AllLogs.txt"
+                                                                  Dim timestamp As String = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+                                                                  Dim logEntry As String = $"[{timestamp}] Hat-{Hat} | Barkod: {Barkod} | {Mesaj}"
+                                                                  
+                                                                  ' Append to file (thread-safe)
+                                                                  SyncLock GetType(LogYaz)
+                                                                      System.IO.File.AppendAllText(fullPath, logEntry & vbCrLf)
+                                                                  End SyncLock
+                                                              Catch ex As Exception
+                                                                  ' Silent fail to avoid blocking production
+                                                              End Try
+                                                          End Sub)
+        Catch ex As Exception
+            ' Silent fail to avoid blocking production
+        End Try
+    End Sub
+
     Function Klasor_Kontrol() As Boolean
 
         On Error GoTo hata
