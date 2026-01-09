@@ -136,12 +136,21 @@ Partial Public Class frmBarkod
                         Dim RET As Integer = 0
                         Try
                             Dim sqlstr As String = BuildSqlInsertStatement(item)
+                            ' Log SQL insert start (first 100 chars of query)
+                            Dim sqlPreview As String = If(sqlstr.Length > 100, sqlstr.Substring(0, 100) & "...", sqlstr)
+                            LogYaz.LogAllOperations(item.Hat, "SQL_INSERT_START", $"Query: {sqlPreview} | Barkod: {item.Barkod} | Hat: {item.Hat} | Sonuç: {item.Sonuc}")
+                            
                             RET = Connect_DB_Execute(sqlstr, enumDbType.Sql)
                             
                             ' Log successful SQL insert
+                            LogYaz.LogAllOperations(item.Hat, "SQL_INSERT_SUCCESS", $"Rows Affected: {RET}")
+                            ' Legacy log for backward compatibility
                             LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: OK (RET={RET})")
                         Catch sqlEx As Exception
                             ' Log SQL insert error
+                            Dim sqlPreview As String = If(BuildSqlInsertStatement(item).Length > 100, BuildSqlInsertStatement(item).Substring(0, 100) & "...", BuildSqlInsertStatement(item))
+                            LogYaz.LogAllOperations(item.Hat, "SQL_INSERT_ERROR", $"Mesaj: {sqlEx.Message} | Query: {sqlPreview}")
+                            ' Legacy log for backward compatibility
                             LogYaz.LogDebug(item.Hat, item.Barkod, $"SQL Insert: ERROR ({sqlEx.Message})")
                             Throw ' Re-throw to be caught by outer catch
                         End Try
@@ -163,15 +172,21 @@ Partial Public Class frmBarkod
                                     fileName = "Hata.txt"
                                     LogYaz.LogTutGenericAsync(item.Barkod & ";" & item.Sonuc, DosyaPath, fileName)
                             End Select
-                            ' Log file write attempt (actual write is async)
+                            ' Log file write attempt
+                            LogYaz.LogAllOperations(item.Hat, "LOG_FILE_WRITE", $"File: {fileName} | Data: {item.Barkod};{item.Sonuc}")
+                            ' Legacy log for backward compatibility
                             LogYaz.LogDebug(item.Hat, item.Barkod, $"Dosya Yazma: {fileName} | Başlatıldı")
                         Catch fileEx As Exception
                             ' Log file write error
+                            LogYaz.LogAllOperations(item.Hat, "LOG_FILE_ERROR", $"File: {fileName} | Mesaj: {fileEx.Message}")
+                            ' Legacy log for backward compatibility
                             LogYaz.LogDebug(item.Hat, item.Barkod, $"Dosya Yazma: {fileName} | ERROR ({fileEx.Message})")
                         End Try
 
                     Catch ex As Exception
                         Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger hatası ({hat}) - Barkod: {item.Barkod}: {ex.Message}")))
+                        ' Log general error
+                        LogYaz.LogAllOperations(item.Hat, "ERROR", $"Tür: Logger Error | Mesaj: {ex.Message} | Barkod: {item.Barkod}")
                     End Try
                 Else
                     ' Queue is empty, wait a bit before checking again (reduced CPU usage)
@@ -186,6 +201,7 @@ Partial Public Class frmBarkod
 
         Catch ex As Exception
             Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread hatası ({hat}): {ex.Message}")))
+            LogYaz.LogAllOperations(hat, "ERROR", $"Tür: Logger Thread Error | Mesaj: {ex.Message}")
         Finally
             ' Process remaining items in queue before shutdown
             Dim item As LogItem = Nothing
@@ -388,11 +404,15 @@ Partial Public Class frmBarkod
         Dim weight As String = ""
         Dim Sonuc As String = ""
         Dim kolon As String = ""
+        Dim processStartTime As DateTime = DateTime.Now
         kolon = Hat
         weight = agirlik
 
 
         Try
+            ' Log SAP call start
+            LogYaz.LogAllOperations(Hat, "SAP_CALL_START", $"Barkod: {Barkod} | Ağırlık: {weight} | Tarih: {DateTime.Now.ToString("yyyy-MM-dd")}")
+            
             ' Use hat-specific SAP connection for parallel processing
             ' Each hat (A, B, C) has its own connection and lock to avoid blocking
             Select Case Hat
@@ -414,10 +434,14 @@ Partial Public Class frmBarkod
                         Dim result = sapAppA.ZSFR_MM_008_FM_01(param)
                         If result.EV_STATUS = "S" Then
                             Sonuc = result.ET_ID(0).ZZAUFNR
-                            ' Log successful SAP query
+                            ' Log successful SAP response
+                            LogYaz.LogAllOperations(Hat, "SAP_RESPONSE", $"Status: S | Sonuç: {Sonuc} | Ağırlık: {weight}")
+                            ' Legacy log for backward compatibility
                             LogYaz.LogDebug(Hat, Barkod, $"SAP: OK (Sonuç: {Sonuc})")
                         Else
-                            ' Log SAP query with non-success status
+                            ' Log SAP error response
+                            LogYaz.LogAllOperations(Hat, "SAP_ERROR", $"Status: {result.EV_STATUS} | Barkod: {Barkod} | Mesaj: Non-success status returned")
+                            ' Legacy log for backward compatibility
                             LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Status: {result.EV_STATUS})")
                         End If
                     End SyncLock
@@ -440,10 +464,14 @@ Partial Public Class frmBarkod
                         Dim result = sapAppB.ZSFR_MM_008_FM_01(param)
                         If result.EV_STATUS = "S" Then
                             Sonuc = result.ET_ID(0).ZZAUFNR
-                            ' Log successful SAP query
+                            ' Log successful SAP response
+                            LogYaz.LogAllOperations(Hat, "SAP_RESPONSE", $"Status: S | Sonuç: {Sonuc} | Ağırlık: {weight}")
+                            ' Legacy log for backward compatibility
                             LogYaz.LogDebug(Hat, Barkod, $"SAP: OK (Sonuç: {Sonuc})")
                         Else
-                            ' Log SAP query with non-success status
+                            ' Log SAP error response
+                            LogYaz.LogAllOperations(Hat, "SAP_ERROR", $"Status: {result.EV_STATUS} | Barkod: {Barkod} | Mesaj: Non-success status returned")
+                            ' Legacy log for backward compatibility
                             LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Status: {result.EV_STATUS})")
                         End If
                     End SyncLock
@@ -466,16 +494,21 @@ Partial Public Class frmBarkod
                         Dim result = sapAppC.ZSFR_MM_008_FM_01(param)
                         If result.EV_STATUS = "S" Then
                             Sonuc = result.ET_ID(0).ZZAUFNR
-                            ' Log successful SAP query
+                            ' Log successful SAP response
+                            LogYaz.LogAllOperations(Hat, "SAP_RESPONSE", $"Status: S | Sonuç: {Sonuc} | Ağırlık: {weight}")
+                            ' Legacy log for backward compatibility
                             LogYaz.LogDebug(Hat, Barkod, $"SAP: OK (Sonuç: {Sonuc})")
                         Else
-                            ' Log SAP query with non-success status
+                            ' Log SAP error response
+                            LogYaz.LogAllOperations(Hat, "SAP_ERROR", $"Status: {result.EV_STATUS} | Barkod: {Barkod} | Mesaj: Non-success status returned")
+                            ' Legacy log for backward compatibility
                             LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Status: {result.EV_STATUS})")
                         End If
                     End SyncLock
                     
                 Case Else
                     ' Unknown hat - log error and skip processing
+                    LogYaz.LogAllOperations(Hat, "ERROR", $"Tür: Unknown Hat | Mesaj: Invalid hat value: {Hat} | Barkod: {Barkod}")
                     LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Unknown hat: {Hat})")
                     Sonuc = "ERROR: Unknown Hat"
             End Select
@@ -492,7 +525,10 @@ Partial Public Class frmBarkod
                                           ListBox1.Items.Add(ex.ToString)
                                           TextBox1.Text += ex.ToString
                                       End Sub))
-            ' Log SAP query exception
+            ' Log SAP exception with stack trace (first 200 chars)
+            Dim stackTrace As String = If(ex.StackTrace?.Length > 200, ex.StackTrace.Substring(0, 200), ex.StackTrace)
+            LogYaz.LogAllOperations(Hat, "SAP_ERROR", $"Barkod: {Barkod} | Mesaj: {ex.Message} | Stack: {stackTrace}")
+            ' Legacy log for backward compatibility
             LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR ({ex.Message})")
 
         End Try
@@ -520,6 +556,11 @@ Partial Public Class frmBarkod
                 queueError.Enqueue(logItem)
         End Select
 
+        ' Log process complete with total time
+        Dim totalTime As Long = CLng((DateTime.Now - processStartTime).TotalMilliseconds)
+        Dim resultStatus As String = If(cevap AndAlso Not String.IsNullOrEmpty(Sonuc) AndAlso Sonuc <> "ERROR: Unknown Hat", "Başarılı", "Hata")
+        LogYaz.LogAllOperations(Hat, "PROCESS_COMPLETE", $"Barkod: {Barkod} | Sonuç: {resultStatus} | Süre: {totalTime}ms")
+
         ' Return immediately - background thread will process DB and file writes
 
     End Sub
@@ -540,23 +581,44 @@ Partial Public Class frmBarkod
                 ' Process SAP query in background thread - non-blocking
                 Dim hat As String = "A"
                 Dim weight As String = txt_tartim2.Text
+                ' Log barcode received event
+                LogYaz.LogAllOperations(hat, "BARCODE_RECEIVED", $"Okunan Barkod: {barcode} | IP: {deviceIp} | Ağırlık: {weight}")
                 System.Threading.ThreadPool.QueueUserWorkItem(Sub(state) VeriOnay(barcode, hat, weight))
             Case "192.168.0.13"
                 CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub() txtBarcodeB.Text = barcode), New Object() {})
                 ' Process SAP query in background thread - non-blocking
                 Dim hat As String = "B"
                 Dim weight As String = txt_tartim3.Text
+                ' Log barcode received event
+                LogYaz.LogAllOperations(hat, "BARCODE_RECEIVED", $"Okunan Barkod: {barcode} | IP: {deviceIp} | Ağırlık: {weight}")
                 System.Threading.ThreadPool.QueueUserWorkItem(Sub(state) VeriOnay(barcode, hat, weight))
             Case "192.168.0.8"
                 CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub() txtBarcodeC.Text = barcode), New Object() {})
                 ' Process SAP query in background thread - non-blocking
                 Dim hat As String = "C"
                 Dim weight As String = txt_tartim1.Text
+                ' Log barcode received event
+                LogYaz.LogAllOperations(hat, "BARCODE_RECEIVED", $"Okunan Barkod: {barcode} | IP: {deviceIp} | Ağırlık: {weight}")
                 System.Threading.ThreadPool.QueueUserWorkItem(Sub(state) VeriOnay(barcode, hat, weight))
         End Select
     End Sub
 
     Private Sub UpdateConnectionStatus(hat As String, isConnected As Boolean)
+        ' Determine IP and port based on hat
+        Dim ipPort As String = ""
+        Select Case hat
+            Case "A"
+                ipPort = "192.168.0.6:2112"
+            Case "B"
+                ipPort = "192.168.0.13:2112"
+            Case "C"
+                ipPort = "192.168.0.8:2112"
+        End Select
+        
+        ' Log connection status change
+        Dim status As String = If(isConnected, "Bağlı", "Bağlı Değil")
+        LogYaz.LogAllOperations(hat, "CONNECTION_STATUS", $"HAT: {hat} | Status: {status} | Adres: {ipPort}")
+        
         CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                   Select Case hat
                                                                                       Case "A"
@@ -657,6 +719,8 @@ Partial Public Class frmBarkod
                 Catch ex As System.IO.IOException
                     ' Connection lost
                     UpdateConnectionStatus(hat, False)
+                    ' Log connection error
+                    LogYaz.LogAllOperations(hat, "ERROR", $"Tür: Connection Error | Mesaj: {ex.Message}")
                     CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                                ListBox1.Items.Add($"Bağlantı hatası ({hat}): {ex.Message}")
                                                                                            End Sub), New Object() {})
@@ -683,6 +747,8 @@ Partial Public Class frmBarkod
                 Catch ex As SocketException
                     ' Network error
                     UpdateConnectionStatus(hat, False)
+                    ' Log network error
+                    LogYaz.LogAllOperations(hat, "ERROR", $"Tür: Network Error | Mesaj: {ex.Message}")
                     CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                                ListBox1.Items.Add($"Ağ hatası ({hat}): {ex.Message}")
                                                                                            End Sub), New Object() {})
@@ -708,6 +774,7 @@ Partial Public Class frmBarkod
 
                 Catch ex As Exception
                     ' Other exceptions
+                    LogYaz.LogAllOperations(hat, "ERROR", $"Tür: Barcode Reader Error | Mesaj: {ex.Message}")
                     CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
                                                                                                ListBox1.Items.Add($"Beklenmeyen hata ({hat}): {ex.Message}")
                                                                                            End Sub), New Object() {})
