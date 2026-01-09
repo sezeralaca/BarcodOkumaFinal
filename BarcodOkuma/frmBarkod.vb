@@ -261,11 +261,11 @@ Partial Public Class frmBarkod
 
         Select Case Hat
             Case "A"
-                LogYaz.LogTutGeneric(Barkod & ";" & Sonuc, DosyaPath, "Barcod1.txt")
+                LogYaz.LogTutGenericAsync(Barkod & ";" & Sonuc, DosyaPath, "Barcod1.txt")
             Case "B"
-                LogYaz.LogTutGeneric(Barkod & ";" & Sonuc, DosyaPath, "Barcod2.txt")
+                LogYaz.LogTutGenericAsync(Barkod & ";" & Sonuc, DosyaPath, "Barcod2.txt")
             Case "C"
-                LogYaz.LogTutGeneric(Barkod & ";" & Sonuc, DosyaPath, "Barcod3.txt")
+                LogYaz.LogTutGenericAsync(Barkod & ";" & Sonuc, DosyaPath, "Barcod3.txt")
             Case Else
                 LogYaz.LogTutGeneric(Barkod & ";" & Sonuc, DosyaPath, "Hata.txt")
 
