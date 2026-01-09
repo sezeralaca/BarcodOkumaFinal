@@ -100,6 +100,14 @@ Partial Public Class frmBarkod
         End Try
     End Sub
 
+    ' Helper function to escape single quotes for SQL string concatenation (prevent SQL injection)
+    Private Function SqlEscape(value As String) As String
+        If String.IsNullOrEmpty(value) Then
+            Return ""
+        End If
+        Return value.Replace("'", "''")
+    End Function
+
     ' Background logger thread - processes queue items for one hat
     Private Sub BackgroundLoggerThread(queue As ConcurrentQueue(Of LogItem), hat As String, cancellationToken As CancellationToken)
         Try
@@ -115,12 +123,12 @@ Partial Public Class frmBarkod
                         Try
                             Dim sqlstr As String
                             sqlstr = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP])  VALUES ( "
-                            sqlstr = sqlstr & "'" & item.Barkod & "', GETDATE(),"
-                            sqlstr = sqlstr & "'" & item.Hat & "',"
+                            sqlstr = sqlstr & "'" & SqlEscape(item.Barkod) & "', GETDATE(),"
+                            sqlstr = sqlstr & "'" & SqlEscape(item.Hat) & "',"
                             If item.Cevap = True Then
-                                sqlstr = sqlstr & "'" & item.Sonuc & "')"
+                                sqlstr = sqlstr & "'" & SqlEscape(item.Sonuc) & "')"
                             Else
-                                sqlstr = sqlstr & "'" & item.Cevap & "')"
+                                sqlstr = sqlstr & "'False')"
                             End If
                             RET = Connect_DB_Execute(sqlstr, enumDbType.Sql)
                             
@@ -181,12 +189,12 @@ Partial Public Class frmBarkod
                     ' Quick processing of remaining items using exact SQL format from 497e3a65
                     Dim sqlstr As String
                     sqlstr = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP])  VALUES ( "
-                    sqlstr = sqlstr & "'" & item.Barkod & "', GETDATE(),"
-                    sqlstr = sqlstr & "'" & item.Hat & "',"
+                    sqlstr = sqlstr & "'" & SqlEscape(item.Barkod) & "', GETDATE(),"
+                    sqlstr = sqlstr & "'" & SqlEscape(item.Hat) & "',"
                     If item.Cevap = True Then
-                        sqlstr = sqlstr & "'" & item.Sonuc & "')"
+                        sqlstr = sqlstr & "'" & SqlEscape(item.Sonuc) & "')"
                     Else
-                        sqlstr = sqlstr & "'" & item.Cevap & "')"
+                        sqlstr = sqlstr & "'False')"
                     End If
                     Dim RET As Integer = Connect_DB_Execute(sqlstr, enumDbType.Sql)
                     shutdownProcessedCount += 1
