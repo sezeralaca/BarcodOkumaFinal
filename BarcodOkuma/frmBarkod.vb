@@ -97,16 +97,24 @@ Partial Public Class frmBarkod
                 If queue.TryDequeue(item) Then
                     Try
                         ' Process DB write (blocking operation moved to background)
-                        Dim sqlstr As String = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP]) VALUES ("
-                        sqlstr &= "'" & item.Barkod & "', GETDATE(),"
-                        sqlstr &= "'" & item.Hat & "',"
-                        If item.Cevap Then
-                            sqlstr &= "'" & item.Sonuc & "')"
-                        Else
-                            sqlstr &= "'" & item.Cevap.ToString() & "')"
-                        End If
-
-                        Connect_DB_Execute(sqlstr, enumDbType.Sql)
+                        ' Using parameterized query to prevent SQL injection
+                        Dim sqlstr As String = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP]) VALUES (@Barkod, GETDATE(), @Hat, @Cevap)"
+                        
+                        Using conn As New System.Data.SqlClient.SqlConnection(Database.ConStr)
+                            Using cmd As New System.Data.SqlClient.SqlCommand(sqlstr, conn)
+                                cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
+                                cmd.Parameters.AddWithValue("@Hat", item.Hat)
+                                If item.Cevap Then
+                                    cmd.Parameters.AddWithValue("@Cevap", item.Sonuc)
+                                Else
+                                    cmd.Parameters.AddWithValue("@Cevap", item.Cevap.ToString())
+                                End If
+                                
+                                conn.Open()
+                                cmd.ExecuteNonQuery()
+                                conn.Close()
+                            End Using
+                        End Using
 
                         ' Process file write (non-blocking)
                         Select Case item.Hat
@@ -119,18 +127,41 @@ Partial Public Class frmBarkod
                         End Select
 
                     Catch ex As Exception
-                        Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger hatası ({hat}): {ex.Message}")))
+                        Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger hatası ({hat}) - Barkod: {item.Barkod}: {ex.Message}")))
                     End Try
                 Else
-                    ' Queue is empty, wait a bit before checking again
-                    cancellationToken.WaitHandle.WaitOne(100)
+                    ' Queue is empty, wait a bit before checking again (reduced CPU usage)
+                    cancellationToken.WaitHandle.WaitOne(500)
                 End If
             End While
 
         Catch ex As Exception
             Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread hatası ({hat}): {ex.Message}")))
         Finally
-            Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread sonlandırıldı ({hat})")))
+            ' Process remaining items in queue before shutdown
+            Dim item As LogItem = Nothing
+            Dim processedCount As Integer = 0
+            While queue.TryDequeue(item) AndAlso processedCount < 100
+                Try
+                    ' Quick processing of remaining items
+                    Dim sqlstr As String = "INSERT INTO [SIMFER].[dbo].[AMBAR] ([BARKOD],[TARIH],[HAT],[CEVAP]) VALUES (@Barkod, GETDATE(), @Hat, @Cevap)"
+                    Using conn As New System.Data.SqlClient.SqlConnection(Database.ConStr)
+                        Using cmd As New System.Data.SqlClient.SqlCommand(sqlstr, conn)
+                            cmd.Parameters.AddWithValue("@Barkod", item.Barkod)
+                            cmd.Parameters.AddWithValue("@Hat", item.Hat)
+                            cmd.Parameters.AddWithValue("@Cevap", If(item.Cevap, item.Sonuc, item.Cevap.ToString()))
+                            conn.Open()
+                            cmd.ExecuteNonQuery()
+                            conn.Close()
+                        End Using
+                    End Using
+                    processedCount += 1
+                Catch ex As Exception
+                    ' Silently fail during shutdown to avoid blocking
+                End Try
+            End While
+            
+            Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread sonlandırıldı ({hat}) - Kalan {processedCount} kayıt işlendi")))
         End Try
     End Sub
 
@@ -252,10 +283,10 @@ Partial Public Class frmBarkod
             If threadB IsNot Nothing AndAlso threadB.IsAlive Then threadB.Join(1000)
             If threadC IsNot Nothing AndAlso threadC.IsAlive Then threadC.Join(1000)
 
-            ' Wait for logger threads to finish
-            If loggerThreadA IsNot Nothing AndAlso loggerThreadA.IsAlive Then loggerThreadA.Join(1000)
-            If loggerThreadB IsNot Nothing AndAlso loggerThreadB.IsAlive Then loggerThreadB.Join(1000)
-            If loggerThreadC IsNot Nothing AndAlso loggerThreadC.IsAlive Then loggerThreadC.Join(1000)
+            ' Wait for logger threads to finish processing remaining queue items (longer timeout)
+            If loggerThreadA IsNot Nothing AndAlso loggerThreadA.IsAlive Then loggerThreadA.Join(5000)
+            If loggerThreadB IsNot Nothing AndAlso loggerThreadB.IsAlive Then loggerThreadB.Join(5000)
+            If loggerThreadC IsNot Nothing AndAlso loggerThreadC.IsAlive Then loggerThreadC.Join(5000)
 
             ' Dispose cancellation sources
             If cancellationSourceA IsNot Nothing Then cancellationSourceA.Dispose()
