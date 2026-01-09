@@ -33,9 +33,13 @@ Partial Public Class frmBarkod
     Private cancellationSourceB As Threading.CancellationTokenSource
     Private cancellationSourceC As Threading.CancellationTokenSource
 
-    ' Persistent SAP connection for performance optimization
-    Private sapApp As ZSFR_MM_022_FM_01 = Nothing
-    Private ReadOnly sapLock As New Object()
+    ' Persistent SAP connections for performance optimization - one per hat for parallel processing
+    Private sapAppA As ZSFR_MM_022_FM_01 = Nothing
+    Private sapAppB As ZSFR_MM_022_FM_01 = Nothing
+    Private sapAppC As ZSFR_MM_022_FM_01 = Nothing
+    Private ReadOnly sapLockA As New Object()
+    Private ReadOnly sapLockB As New Object()
+    Private ReadOnly sapLockC As New Object()
 
     ' Configuration constants
     Private Const MAX_SHUTDOWN_QUEUE_ITEMS As Integer = 100  ' Max items to process during shutdown
@@ -69,16 +73,19 @@ Partial Public Class frmBarkod
         InitializeComponent()
     End Sub
 
-    ' Initialize persistent SAP connection for performance optimization
+    ' Initialize persistent SAP connections for performance optimization - one per hat
     Private Sub InitializeSAPConnection()
         Try
-            CreateSAPConnection()
+            ' Create separate SAP connection for each hat to enable parallel processing
+            CreateSAPConnection("A")
+            CreateSAPConnection("B")
+            CreateSAPConnection("C")
             
             ' Use BeginInvoke for thread-safe UI update
             If Me.InvokeRequired Then
-                Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add("SAP bağlantısı kuruldu")))
+                Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add("SAP bağlantıları kuruldu (A, B, C)")))
             Else
-                ListBox1.Items.Add("SAP bağlantısı kuruldu")
+                ListBox1.Items.Add("SAP bağlantıları kuruldu (A, B, C)")
             End If
         Catch ex As Exception
             ' Use BeginInvoke for thread-safe UI update
@@ -192,16 +199,31 @@ Partial Public Class frmBarkod
         End Try
     End Sub
 
-    ' Create or reinitialize SAP connection - shared method
-    Private Sub CreateSAPConnection()
+    ' Create or reinitialize SAP connection for specific hat - enables parallel SAP calls
+    Private Sub CreateSAPConnection(hat As String)
         Dim wsdlurl As String = "http://sapapp.sersim.smfr.local:8000/sap/bc/srt/wsdl/flv_10002A111AD1/bndg_url/sap/bc/srt/rfc/sap/zsfr_mm_008_fm_01/100/zsfr_mm_022_fm_01/zsfr_mm_022_fm_01?sap-client=100"
         Dim cre = New NetworkCredential("msk.services", "Sers!m2023.Prod").GetCredential(New Uri(wsdlurl), "Basic")
         
-        SyncLock sapLock
-            sapApp = New ZSFR_MM_022_FM_01()
-            sapApp.Credentials = cre
-            sapApp.Timeout = 15000 ' 15 second timeout for SAP operations
-        End SyncLock
+        Select Case hat
+            Case "A"
+                SyncLock sapLockA
+                    sapAppA = New ZSFR_MM_022_FM_01()
+                    sapAppA.Credentials = cre
+                    sapAppA.Timeout = 15000 ' 15 second timeout for SAP operations
+                End SyncLock
+            Case "B"
+                SyncLock sapLockB
+                    sapAppB = New ZSFR_MM_022_FM_01()
+                    sapAppB.Credentials = cre
+                    sapAppB.Timeout = 15000 ' 15 second timeout for SAP operations
+                End SyncLock
+            Case "C"
+                SyncLock sapLockC
+                    sapAppC = New ZSFR_MM_022_FM_01()
+                    sapAppC.Credentials = cre
+                    sapAppC.Timeout = 15000 ' 15 second timeout for SAP operations
+                End SyncLock
+        End Select
     End Sub
 
     Sub tutorial()
@@ -322,11 +344,25 @@ Partial Public Class frmBarkod
             If cancellationSourceC IsNot Nothing Then cancellationSourceC.Dispose()
             If loggerCancellationSource IsNot Nothing Then loggerCancellationSource.Dispose()
 
-            ' Dispose SAP connection
-            SyncLock sapLock
-                If sapApp IsNot Nothing Then
-                    sapApp.Dispose()
-                    sapApp = Nothing
+            ' Dispose SAP connections
+            SyncLock sapLockA
+                If sapAppA IsNot Nothing Then
+                    sapAppA.Dispose()
+                    sapAppA = Nothing
+                End If
+            End SyncLock
+            
+            SyncLock sapLockB
+                If sapAppB IsNot Nothing Then
+                    sapAppB.Dispose()
+                    sapAppB = Nothing
+                End If
+            End SyncLock
+            
+            SyncLock sapLockC
+                If sapAppC IsNot Nothing Then
+                    sapAppC.Dispose()
+                    sapAppC = Nothing
                 End If
             End SyncLock
         Finally
@@ -351,31 +387,91 @@ Partial Public Class frmBarkod
 
 
         Try
-            ' Use persistent SAP connection for performance
-            SyncLock sapLock
-                If sapApp Is Nothing Then
-                    ' Fallback: initialize connection if not already done
-                    CreateSAPConnection()
-                End If
-                
-                Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
-                p.AGIRLIK = weight
-                p.SERINO = Barkod
-                p.TARIH = DateTime.Now.ToString("yyyy-MM-dd")
-                Dim parray As ZSFR_MM_008_S_02() = New ZSFR_MM_008_S_02(0) {}
-                parray(0) = p
-                Dim param As ZSFR_MM_008_FM_01 = New ZSFR_MM_008_FM_01()
-                param.IT_ITEMS = parray
-                Dim result = sapApp.ZSFR_MM_008_FM_01(param)
-                If result.EV_STATUS = "S" Then
-                    Sonuc = result.ET_ID(0).ZZAUFNR
-                    ' Log successful SAP query
-                    LogYaz.LogDebug(Hat, Barkod, $"SAP: OK (Sonuç: {Sonuc})")
-                Else
-                    ' Log SAP query with non-success status
-                    LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Status: {result.EV_STATUS})")
-                End If
-            End SyncLock
+            ' Use hat-specific SAP connection for parallel processing
+            ' Each hat (A, B, C) has its own connection and lock to avoid blocking
+            Select Case Hat
+                Case "A"
+                    SyncLock sapLockA
+                        If sapAppA Is Nothing Then
+                            ' Fallback: initialize connection if not already done
+                            CreateSAPConnection("A")
+                        End If
+                        
+                        Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
+                        p.AGIRLIK = weight
+                        p.SERINO = Barkod
+                        p.TARIH = DateTime.Now.ToString("yyyy-MM-dd")
+                        Dim parray As ZSFR_MM_008_S_02() = New ZSFR_MM_008_S_02(0) {}
+                        parray(0) = p
+                        Dim param As ZSFR_MM_008_FM_01 = New ZSFR_MM_008_FM_01()
+                        param.IT_ITEMS = parray
+                        Dim result = sapAppA.ZSFR_MM_008_FM_01(param)
+                        If result.EV_STATUS = "S" Then
+                            Sonuc = result.ET_ID(0).ZZAUFNR
+                            ' Log successful SAP query
+                            LogYaz.LogDebug(Hat, Barkod, $"SAP: OK (Sonuç: {Sonuc})")
+                        Else
+                            ' Log SAP query with non-success status
+                            LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Status: {result.EV_STATUS})")
+                        End If
+                    End SyncLock
+                    
+                Case "B"
+                    SyncLock sapLockB
+                        If sapAppB Is Nothing Then
+                            ' Fallback: initialize connection if not already done
+                            CreateSAPConnection("B")
+                        End If
+                        
+                        Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
+                        p.AGIRLIK = weight
+                        p.SERINO = Barkod
+                        p.TARIH = DateTime.Now.ToString("yyyy-MM-dd")
+                        Dim parray As ZSFR_MM_008_S_02() = New ZSFR_MM_008_S_02(0) {}
+                        parray(0) = p
+                        Dim param As ZSFR_MM_008_FM_01 = New ZSFR_MM_008_FM_01()
+                        param.IT_ITEMS = parray
+                        Dim result = sapAppB.ZSFR_MM_008_FM_01(param)
+                        If result.EV_STATUS = "S" Then
+                            Sonuc = result.ET_ID(0).ZZAUFNR
+                            ' Log successful SAP query
+                            LogYaz.LogDebug(Hat, Barkod, $"SAP: OK (Sonuç: {Sonuc})")
+                        Else
+                            ' Log SAP query with non-success status
+                            LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Status: {result.EV_STATUS})")
+                        End If
+                    End SyncLock
+                    
+                Case "C"
+                    SyncLock sapLockC
+                        If sapAppC Is Nothing Then
+                            ' Fallback: initialize connection if not already done
+                            CreateSAPConnection("C")
+                        End If
+                        
+                        Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
+                        p.AGIRLIK = weight
+                        p.SERINO = Barkod
+                        p.TARIH = DateTime.Now.ToString("yyyy-MM-dd")
+                        Dim parray As ZSFR_MM_008_S_02() = New ZSFR_MM_008_S_02(0) {}
+                        parray(0) = p
+                        Dim param As ZSFR_MM_008_FM_01 = New ZSFR_MM_008_FM_01()
+                        param.IT_ITEMS = parray
+                        Dim result = sapAppC.ZSFR_MM_008_FM_01(param)
+                        If result.EV_STATUS = "S" Then
+                            Sonuc = result.ET_ID(0).ZZAUFNR
+                            ' Log successful SAP query
+                            LogYaz.LogDebug(Hat, Barkod, $"SAP: OK (Sonuç: {Sonuc})")
+                        Else
+                            ' Log SAP query with non-success status
+                            LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Status: {result.EV_STATUS})")
+                        End If
+                    End SyncLock
+                    
+                Case Else
+                    ' Unknown hat - log error
+                    LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Unknown hat: {Hat})")
+            End Select
 
             ListBox1.Items.Add(" " + Sonuc.ToString + "   " + weight)
 
