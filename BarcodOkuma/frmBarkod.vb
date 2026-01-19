@@ -81,7 +81,7 @@ Partial Public Class frmBarkod
             CreateSAPConnection("A")
             CreateSAPConnection("B")
             CreateSAPConnection("C")
-            
+
             ' Use BeginInvoke for thread-safe UI update
             If Me.InvokeRequired Then
                 Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add("SAP bağlantıları kuruldu (A, B, C)")))
@@ -109,7 +109,7 @@ Partial Public Class frmBarkod
         End If
         Return value.Replace("'", "''")
     End Function
-    
+
     ' Helper function to get SQL query preview for logging
     Private Function GetSqlPreview(sql As String, Optional maxLength As Integer = SQL_PREVIEW_LENGTH) As String
         If String.IsNullOrEmpty(sql) Then
@@ -152,9 +152,9 @@ Partial Public Class frmBarkod
                             ' Log SQL insert start (using helper for preview)
                             Dim sqlPreview As String = GetSqlPreview(sqlstr)
                             LogYaz.LogAllOperations(item.Hat, "SQL_INSERT_START", $"Query: {sqlPreview} | Barkod: {item.Barkod} | Hat: {item.Hat} | Sonuç: {item.Sonuc}")
-                            
+
                             RET = Connect_DB_Execute(sqlstr, enumDbType.Sql)
-                            
+
                             ' Log successful SQL insert
                             LogYaz.LogAllOperations(item.Hat, "SQL_INSERT_SUCCESS", $"Rows Affected: {RET}")
                             ' Legacy log for backward compatibility
@@ -229,7 +229,7 @@ Partial Public Class frmBarkod
                     ' Silently fail during shutdown to avoid blocking
                 End Try
             End While
-            
+
             Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread sonlandırıldı ({hat}) - Kalan {shutdownProcessedCount} kayıt işlendi")))
         End Try
     End Sub
@@ -238,7 +238,7 @@ Partial Public Class frmBarkod
     Private Sub CreateSAPConnection(hat As String)
         Dim wsdlurl As String = "http://sapapp.sersim.smfr.local:8000/sap/bc/srt/wsdl/flv_10002A111AD1/bndg_url/sap/bc/srt/rfc/sap/zsfr_mm_008_fm_01/100/zsfr_mm_022_fm_01/zsfr_mm_022_fm_01?sap-client=100"
         Dim cre = New NetworkCredential("msk.services", "Sers!m2023.Prod").GetCredential(New Uri(wsdlurl), "Basic")
-        
+
         Select Case hat
             Case "A"
                 SyncLock sapLockA
@@ -386,14 +386,14 @@ Partial Public Class frmBarkod
                     sapAppA = Nothing
                 End If
             End SyncLock
-            
+
             SyncLock sapLockB
                 If sapAppB IsNot Nothing Then
                     sapAppB.Dispose()
                     sapAppB = Nothing
                 End If
             End SyncLock
-            
+
             SyncLock sapLockC
                 If sapAppC IsNot Nothing Then
                     sapAppC.Dispose()
@@ -425,7 +425,7 @@ Partial Public Class frmBarkod
         Try
             ' Log SAP call start
             LogYaz.LogAllOperations(Hat, "SAP_CALL_START", $"Barkod: {Barkod} | Ağırlık: {weight} | Tarih: {DateTime.Now.ToString("yyyy-MM-dd")}")
-            
+
             ' Use hat-specific SAP connection for parallel processing
             ' Each hat (A, B, C) has its own connection and lock to avoid blocking
             Select Case Hat
@@ -435,7 +435,7 @@ Partial Public Class frmBarkod
                             ' Fallback: initialize connection if not already done
                             CreateSAPConnection("A")
                         End If
-                        
+
                         Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
                         p.AGIRLIK = weight
                         p.SERINO = Barkod
@@ -458,14 +458,14 @@ Partial Public Class frmBarkod
                             LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Status: {result.EV_STATUS})")
                         End If
                     End SyncLock
-                    
+
                 Case "B"
                     SyncLock sapLockB
                         If sapAppB Is Nothing Then
                             ' Fallback: initialize connection if not already done
                             CreateSAPConnection("B")
                         End If
-                        
+
                         Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
                         p.AGIRLIK = weight
                         p.SERINO = Barkod
@@ -488,14 +488,14 @@ Partial Public Class frmBarkod
                             LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Status: {result.EV_STATUS})")
                         End If
                     End SyncLock
-                    
+
                 Case "C"
                     SyncLock sapLockC
                         If sapAppC Is Nothing Then
                             ' Fallback: initialize connection if not already done
                             CreateSAPConnection("C")
                         End If
-                        
+
                         Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
                         p.AGIRLIK = weight
                         p.SERINO = Barkod
@@ -518,7 +518,7 @@ Partial Public Class frmBarkod
                             LogYaz.LogDebug(Hat, Barkod, $"SAP: ERROR (Status: {result.EV_STATUS})")
                         End If
                     End SyncLock
-                    
+
                 Case Else
                     ' Unknown hat - log error and skip processing
                     LogYaz.LogAllOperations(Hat, "ERROR", $"Tür: Unknown Hat | Mesaj: Invalid hat value: {Hat} | Barkod: {Barkod}")
@@ -634,39 +634,39 @@ Partial Public Class frmBarkod
             Case "C"
                 ipPort = "192.168.0.8:2112"
         End Select
-        
+
         ' Log connection status change
         Dim status As String = If(isConnected, "Bağlı", "Bağlı Değil")
         LogYaz.LogAllOperations(hat, "CONNECTION_STATUS", $"HAT: {hat} | Status: {status} | Adres: {ipPort}")
-        
+
         CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                  Select Case hat
-                                                                                      Case "A"
-                                                                                          If isConnected Then
-                                                                                              lblConnectionA.ForeColor = Color.Green
-                                                                                              lblConnectionA.Text = "Bağlı"
-                                                                                          Else
-                                                                                              lblConnectionA.ForeColor = Color.Red
-                                                                                              lblConnectionA.Text = "Bağlı Değil"
-                                                                                          End If
-                                                                                      Case "B"
-                                                                                          If isConnected Then
-                                                                                              lblConnectionB.ForeColor = Color.Green
-                                                                                              lblConnectionB.Text = "Bağlı"
-                                                                                          Else
-                                                                                              lblConnectionB.ForeColor = Color.Red
-                                                                                              lblConnectionB.Text = "Bağlı Değil"
-                                                                                          End If
-                                                                                      Case "C"
-                                                                                          If isConnected Then
-                                                                                              lblConnectionC.ForeColor = Color.Green
-                                                                                              lblConnectionC.Text = "Bağlı"
-                                                                                          Else
-                                                                                              lblConnectionC.ForeColor = Color.Red
-                                                                                              lblConnectionC.Text = "Bağlı Değil"
-                                                                                          End If
-                                                                                  End Select
-                                                                              End Sub), New Object() {})
+                                                                                       Select Case hat
+                                                                                           Case "A"
+                                                                                               If isConnected Then
+                                                                                                   lblConnectionA.ForeColor = Color.Green
+                                                                                                   lblConnectionA.Text = "Bağlı"
+                                                                                               Else
+                                                                                                   lblConnectionA.ForeColor = Color.Red
+                                                                                                   lblConnectionA.Text = "Bağlı Değil"
+                                                                                               End If
+                                                                                           Case "B"
+                                                                                               If isConnected Then
+                                                                                                   lblConnectionB.ForeColor = Color.Green
+                                                                                                   lblConnectionB.Text = "Bağlı"
+                                                                                               Else
+                                                                                                   lblConnectionB.ForeColor = Color.Red
+                                                                                                   lblConnectionB.Text = "Bağlı Değil"
+                                                                                               End If
+                                                                                           Case "C"
+                                                                                               If isConnected Then
+                                                                                                   lblConnectionC.ForeColor = Color.Green
+                                                                                                   lblConnectionC.Text = "Bağlı"
+                                                                                               Else
+                                                                                                   lblConnectionC.ForeColor = Color.Red
+                                                                                                   lblConnectionC.Text = "Bağlı Değil"
+                                                                                               End If
+                                                                                       End Select
+                                                                                   End Sub), New Object() {})
     End Sub
 
     Private Sub BarcodeReaderThread(ip As String, port As Integer, hat As String, ByRef client As TcpClient, cancellationToken As Threading.CancellationToken)
@@ -677,8 +677,8 @@ Partial Public Class frmBarkod
         Try
             ' Log thread start
             CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                       ListBox1.Items.Add($"Thread başlatıldı ({hat}): {ip}:{port}")
-                                                                                   End Sub), New Object() {})
+                                                                                           ListBox1.Items.Add($"Thread başlatıldı ({hat}): {ip}:{port}")
+                                                                                       End Sub), New Object() {})
 
             While Not cancellationToken.IsCancellationRequested
                 Try
@@ -694,8 +694,8 @@ Partial Public Class frmBarkod
 
                         ' Log connection attempt
                         CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                                   ListBox1.Items.Add($"Bağlantı kuruluyor ({hat}): {ip}:{port}")
-                                                                                               End Sub), New Object() {})
+                                                                                                       ListBox1.Items.Add($"Bağlantı kuruluyor ({hat}): {ip}:{port}")
+                                                                                                   End Sub), New Object() {})
 
                         client = New TcpClient()
                         client.Connect(ip, port)
@@ -707,8 +707,8 @@ Partial Public Class frmBarkod
 
                         UpdateConnectionStatus(hat, True)
                         CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                                   ListBox1.Items.Add($"Bağlandı ({hat}): {ip}:{port}")
-                                                                                               End Sub), New Object() {})
+                                                                                                       ListBox1.Items.Add($"Bağlandı ({hat}): {ip}:{port}")
+                                                                                                   End Sub), New Object() {})
                     End If
 
                     ' Blocking read - waits indefinitely for data
@@ -720,8 +720,8 @@ Partial Public Class frmBarkod
                         If Not String.IsNullOrWhiteSpace(barcode) Then
                             OnBarcodeReceived(ip, barcode)
                             CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                                       ListBox1.Items.Add($"Barkod alındı ({hat}): {barcode}")
-                                                                                                   End Sub), New Object() {})
+                                                                                                           ListBox1.Items.Add($"Barkod alındı ({hat}): {barcode}")
+                                                                                                       End Sub), New Object() {})
                         End If
                     ElseIf bytesRead = 0 Then
                         ' Connection closed by remote host
@@ -731,8 +731,8 @@ Partial Public Class frmBarkod
                     ' Periodic "still alive" logging
                     If DateTime.Now.Subtract(lastLogTime).TotalSeconds >= logInterval Then
                         CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                                   ListBox1.Items.Add($"Dinleniyor ({hat}): {ip}:{port}")
-                                                                                               End Sub), New Object() {})
+                                                                                                       ListBox1.Items.Add($"Dinleniyor ({hat}): {ip}:{port}")
+                                                                                                   End Sub), New Object() {})
                         lastLogTime = DateTime.Now
                     End If
 
@@ -742,8 +742,8 @@ Partial Public Class frmBarkod
                     ' Log connection error
                     LogYaz.LogAllOperations(hat, "ERROR", $"Tür: Connection Error | Mesaj: {ex.Message}")
                     CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                               ListBox1.Items.Add($"Bağlantı hatası ({hat}): {ex.Message}")
-                                                                                           End Sub), New Object() {})
+                                                                                                   ListBox1.Items.Add($"Bağlantı hatası ({hat}): {ex.Message}")
+                                                                                               End Sub), New Object() {})
 
                     If stream IsNot Nothing Then
                         Try
@@ -770,8 +770,8 @@ Partial Public Class frmBarkod
                     ' Log network error
                     LogYaz.LogAllOperations(hat, "ERROR", $"Tür: Network Error | Mesaj: {ex.Message}")
                     CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                               ListBox1.Items.Add($"Ağ hatası ({hat}): {ex.Message}")
-                                                                                           End Sub), New Object() {})
+                                                                                                   ListBox1.Items.Add($"Ağ hatası ({hat}): {ex.Message}")
+                                                                                               End Sub), New Object() {})
 
                     If stream IsNot Nothing Then
                         Try
@@ -796,15 +796,15 @@ Partial Public Class frmBarkod
                     ' Other exceptions
                     LogYaz.LogAllOperations(hat, "ERROR", $"Tür: Barcode Reader Error | Mesaj: {ex.Message}")
                     CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                               ListBox1.Items.Add($"Beklenmeyen hata ({hat}): {ex.Message}")
-                                                                                           End Sub), New Object() {})
+                                                                                                   ListBox1.Items.Add($"Beklenmeyen hata ({hat}): {ex.Message}")
+                                                                                               End Sub), New Object() {})
                 End Try
             End While
 
         Catch ex As Exception
             CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                       ListBox1.Items.Add($"Thread hatası ({hat}): {ex.Message}")
-                                                                                   End Sub), New Object() {})
+                                                                                           ListBox1.Items.Add($"Thread hatası ({hat}): {ex.Message}")
+                                                                                       End Sub), New Object() {})
         Finally
             ' Clean up resources
             If stream IsNot Nothing Then
@@ -823,8 +823,8 @@ Partial Public Class frmBarkod
 
             UpdateConnectionStatus(hat, False)
             CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                       ListBox1.Items.Add($"Thread sonlandırıldı ({hat})")
-                                                                                   End Sub), New Object() {})
+                                                                                           ListBox1.Items.Add($"Thread sonlandırıldı ({hat})")
+                                                                                       End Sub), New Object() {})
         End Try
     End Sub
 
@@ -839,7 +839,7 @@ Partial Public Class frmBarkod
         ' Start background logger threads for parallel processing
         Try
             loggerCancellationSource = New CancellationTokenSource()
-            
+
             loggerThreadA = New Thread(Sub() BackgroundLoggerThread(queueA, "A", loggerCancellationSource.Token))
             loggerThreadA.IsBackground = True
             loggerThreadA.Start()
@@ -1076,7 +1076,7 @@ Partial Public Class frmBarkod
 
             Else
                 txt_tartim1.ForeColor = Color.Red
-                txt_tartim1.Text = "NOT OPEN"
+                txt_tartim1.Text = "0"
 
             End If
 
@@ -1097,7 +1097,7 @@ Partial Public Class frmBarkod
                 txt_tartim2.ForeColor = Color.Yellow
             Else
                 txt_tartim2.ForeColor = Color.Red
-                txt_tartim2.Text = "NOT OPEN"
+                txt_tartim2.Text = "0"
 
             End If
 
@@ -1121,8 +1121,7 @@ Partial Public Class frmBarkod
                 txt_tartim3.ForeColor = Color.Orange
             Else
                 txt_tartim3.ForeColor = Color.Red
-
-                txt_tartim3.Text = "NOT OPEN"
+                txt_tartim3.Text = "0"
             End If
 
 
