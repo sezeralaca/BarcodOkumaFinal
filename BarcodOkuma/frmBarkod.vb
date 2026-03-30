@@ -11,9 +11,25 @@ Imports System.Collections.Concurrent
 
 Partial Public Class frmBarkod
 
-    Private port1 As New SerialPort("COM1", 9600, Parity.None, 8, StopBits.One)
-    Private port2 As New SerialPort("COM2", 9600, Parity.None, 8, StopBits.One)
-    Private port3 As New SerialPort("COM3", 9600, Parity.None, 8, StopBits.One)
+    ' Tartı okumaları - arka plan thread ile sürekli okuma (PuTTY gibi direkt)
+    Private ReadOnly weightLock1 As New Object()
+    Private ReadOnly weightLock2 As New Object()
+    Private ReadOnly weightLock3 As New Object()
+    Private lastWeight1 As String = "0"
+    Private lastWeight2 As String = "0"
+    Private lastWeight3 As String = "0"
+    Private weightThread1 As Thread
+    Private weightThread2 As Thread
+    Private weightThread3 As Thread
+    Private weightCancellationSource As CancellationTokenSource
+
+    ' TEST ortamı
+    Private Const WEIGHT_IP_1 As String = "192.168.0.8"
+    Private Const WEIGHT_PORT_1 As Integer = 2114
+    Private Const WEIGHT_IP_2 As String = "192.168.0.23"
+    Private Const WEIGHT_PORT_2 As Integer = 2114
+    Private Const WEIGHT_IP_3 As String = "192.168.0.13"
+    Private Const WEIGHT_PORT_3 As Integer = 2114
 
     Private rdthread As System.Threading.Thread
     Private sclient As S7Client = New S7Client()
@@ -22,6 +38,8 @@ Partial Public Class frmBarkod
     Private res2 As Integer = sclient2.ConnectTo("192.168.0.2", 0, 2)
     Private sclient3 As S7Client = New S7Client()
     Private res3 As Integer = sclient3.ConnectTo("192.168.0.3", 0, 2)
+
+
 
     Private tcpClientA As TcpClient
     Private tcpClientB As TcpClient
@@ -46,6 +64,8 @@ Partial Public Class frmBarkod
     Private Const QUEUE_POLL_INTERVAL_MS As Integer = 500     ' Wait time when queue is empty (ms)
     Private Const SQL_PREVIEW_LENGTH As Integer = 100         ' SQL query preview length for logging
     Private Const MAX_STACK_TRACE_LENGTH As Integer = 200     ' Stack trace truncation length for logging
+    Private Const MAX_LISTBOX_ITEMS As Integer = 200          ' ListBox1 maksimum satır sayısı
+    Private Const MAX_TEXTBOX_LENGTH As Integer = 5000         ' TextBox1 maksimum karakter sayısı
 
     ' Data structure for queued log items
     Private Class LogItem
@@ -74,6 +94,30 @@ Partial Public Class frmBarkod
         InitializeComponent()
     End Sub
 
+    ' ListBox1'e item ekle, limit aşılırsa eski satırları sil
+    Private Sub AddToListBox(text As String)
+        If Me.InvokeRequired Then
+            Me.BeginInvoke(New Action(Sub() AddToListBox(text)))
+            Return
+        End If
+        ListBox1.Items.Add(text)
+        While ListBox1.Items.Count > MAX_LISTBOX_ITEMS
+            ListBox1.Items.RemoveAt(0)
+        End While
+    End Sub
+
+    ' TextBox1'e hata ekle, limit aşılırsa eski metni kes
+    Private Sub AppendToErrorLog(text As String)
+        If Me.InvokeRequired Then
+            Me.BeginInvoke(New Action(Sub() AppendToErrorLog(text)))
+            Return
+        End If
+        TextBox1.Text += text & vbCrLf
+        If TextBox1.Text.Length > MAX_TEXTBOX_LENGTH Then
+            TextBox1.Text = TextBox1.Text.Substring(TextBox1.Text.Length - MAX_TEXTBOX_LENGTH)
+        End If
+    End Sub
+
     ' Initialize persistent SAP connections for performance optimization - one per hat
     Private Sub InitializeSAPConnection()
         Try
@@ -82,23 +126,10 @@ Partial Public Class frmBarkod
             CreateSAPConnection("B")
             CreateSAPConnection("C")
 
-            ' Use BeginInvoke for thread-safe UI update
-            If Me.InvokeRequired Then
-                Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add("SAP bağlantıları kuruldu (A, B, C)")))
-            Else
-                ListBox1.Items.Add("SAP bağlantıları kuruldu (A, B, C)")
-            End If
+            AddToListBox("SAP bağlantıları kuruldu (A, B, C)")
         Catch ex As Exception
-            ' Use BeginInvoke for thread-safe UI update
-            If Me.InvokeRequired Then
-                Me.BeginInvoke(New Action(Sub()
-                                              ListBox1.Items.Add("SAP bağlantısı kurulamadı: " & ex.Message)
-                                              TextBox1.Text += "SAP bağlantısı kurulamadı: " & ex.Message & vbCrLf
-                                          End Sub))
-            Else
-                ListBox1.Items.Add("SAP bağlantısı kurulamadı: " & ex.Message)
-                TextBox1.Text += "SAP bağlantısı kurulamadı: " & ex.Message & vbCrLf
-            End If
+            AddToListBox("SAP bağlantısı kurulamadı: " & ex.Message)
+            AppendToErrorLog("SAP bağlantısı kurulamadı: " & ex.Message)
         End Try
     End Sub
 
@@ -138,7 +169,6 @@ Partial Public Class frmBarkod
     ' Background logger thread - processes queue items for one hat
     Private Sub BackgroundLoggerThread(queue As ConcurrentQueue(Of LogItem), hat As String, cancellationToken As CancellationToken)
         Try
-            Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread başlatıldı ({hat})")))
 
             While Not cancellationToken.IsCancellationRequested
                 Dim item As LogItem = Nothing
@@ -197,7 +227,7 @@ Partial Public Class frmBarkod
                         End Try
 
                     Catch ex As Exception
-                        Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger hatası ({hat}) - Barkod: {item.Barkod}: {ex.Message}")))
+                        AddToListBox($"Logger hatası ({hat}) - Barkod: {item.Barkod}: {ex.Message}")
                         ' Log general error
                         LogYaz.LogAllOperations(item.Hat, "ERROR", $"Tür: Logger Error | Mesaj: {ex.Message} | Barkod: {item.Barkod}")
                     End Try
@@ -213,7 +243,7 @@ Partial Public Class frmBarkod
             End While
 
         Catch ex As Exception
-            Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread hatası ({hat}): {ex.Message}")))
+            AddToListBox($"Logger thread hatası ({hat}): {ex.Message}")
             LogYaz.LogAllOperations(hat, "ERROR", $"Tür: Logger Thread Error | Mesaj: {ex.Message}")
         Finally
             ' Process remaining items in queue before shutdown
@@ -230,7 +260,7 @@ Partial Public Class frmBarkod
                 End Try
             End While
 
-            Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add($"Logger thread sonlandırıldı ({hat}) - Kalan {shutdownProcessedCount} kayıt işlendi")))
+
         End Try
     End Sub
 
@@ -352,9 +382,12 @@ Partial Public Class frmBarkod
             ' Cancel logger threads
             If loggerCancellationSource IsNot Nothing Then loggerCancellationSource.Cancel()
 
-            If port1.IsOpen Then port1.Close()
-            If port2.IsOpen Then port2.Close()
-            If port3.IsOpen Then port3.Close()
+            ' Tartı reader thread'lerini durdur
+            If weightCancellationSource IsNot Nothing Then weightCancellationSource.Cancel()
+            If weightThread1 IsNot Nothing AndAlso weightThread1.IsAlive Then weightThread1.Join(2000)
+            If weightThread2 IsNot Nothing AndAlso weightThread2.IsAlive Then weightThread2.Join(2000)
+            If weightThread3 IsNot Nothing AndAlso weightThread3.IsAlive Then weightThread3.Join(2000)
+
             If sclient.Connected Then sclient.Disconnect()
             If sclient2.Connected Then sclient2.Disconnect()
             If sclient3.Connected Then sclient3.Disconnect()
@@ -377,6 +410,7 @@ Partial Public Class frmBarkod
             If cancellationSourceA IsNot Nothing Then cancellationSourceA.Dispose()
             If cancellationSourceB IsNot Nothing Then cancellationSourceB.Dispose()
             If cancellationSourceC IsNot Nothing Then cancellationSourceC.Dispose()
+            If weightCancellationSource IsNot Nothing Then weightCancellationSource.Dispose()
             If loggerCancellationSource IsNot Nothing Then loggerCancellationSource.Dispose()
 
             ' Dispose SAP connections
@@ -401,12 +435,117 @@ Partial Public Class frmBarkod
                 End If
             End SyncLock
         Finally
-            port1.Dispose()
-            port2.Dispose()
-            port3.Dispose()
-
+            ' TCP client'lar IDisposable değil, Close() ile zaten kapatıldı
         End Try
     End Sub
+
+    ' Tartı UI'ını direkt güncelle (thread-safe, PLC'ye bağımlı değil)
+    Private Sub UpdateWeightUI(weightIndex As Integer, rawValue As String, isConnected As Boolean)
+        If Me.InvokeRequired Then
+            Me.BeginInvoke(New Action(Sub() UpdateWeightUI(weightIndex, rawValue, isConnected)))
+            Return
+        End If
+        Select Case weightIndex
+            Case 1
+                txt_tartim1.Text = rawValue
+                txt_tartim1.ForeColor = If(isConnected, Color.LimeGreen, Color.Red)
+                Button1.BackColor = If(isConnected, Color.LimeGreen, Color.Red)
+            Case 2
+                txt_tartim2.Text = rawValue
+                txt_tartim2.ForeColor = If(isConnected, Color.Yellow, Color.Red)
+                Button2.BackColor = If(isConnected, Color.LimeGreen, Color.Red)
+            Case 3
+                txt_tartim3.Text = rawValue
+                txt_tartim3.ForeColor = If(isConnected, Color.Orange, Color.Red)
+                Button3.BackColor = If(isConnected, Color.LimeGreen, Color.Red)
+        End Select
+    End Sub
+
+    ' Tartı cihazından sürekli okuma - arka plan thread (PuTTY gibi direkt bağlantı)
+    Private Sub WeightReaderThread(ip As String, port As Integer, weightIndex As Integer, cancellationToken As CancellationToken)
+        Dim client As TcpClient = Nothing
+        Dim stream As NetworkStream = Nothing
+
+        Try
+            While Not cancellationToken.IsCancellationRequested
+                Try
+                    ' Bağlantı yoksa kur
+                    If client Is Nothing OrElse Not client.Connected Then
+                        If client IsNot Nothing Then Try : client.Close() : Catch : End Try
+                        client = New TcpClient()
+                        ' 5 saniye connect timeout
+                        Dim connectResult = client.BeginConnect(ip, port, Nothing, Nothing)
+                        If Not connectResult.AsyncWaitHandle.WaitOne(5000) Then
+                            client.Close()
+                            Throw New SocketException(10060)
+                        End If
+                        client.EndConnect(connectResult)
+                        stream = client.GetStream()
+                        AddToListBox($"Tartı {weightIndex} bağlandı: {ip}:{port}")
+                    End If
+
+                    ' Blocking read - veri gelene kadar bekle (PuTTY gibi)
+                    Dim buffer As Byte() = New Byte(1023) {}
+                    Dim bytesRead As Integer = stream.Read(buffer, 0, buffer.Length)
+
+                    If bytesRead > 0 Then
+                        Dim raw As String = System.Text.Encoding.ASCII.GetString(buffer, 0, bytesRead)
+                        ' CR/LF ile ayrılmış satırlardan son satırı al
+                        Dim lines = raw.Split({vbCr, vbLf}, StringSplitOptions.RemoveEmptyEntries)
+                        If lines.Length > 0 Then
+                            Dim value As String = lines(lines.Length - 1).Trim()
+                            If value.Length > 0 Then
+                                ' lastWeight güncelle (SAP için)
+                                Select Case weightIndex
+                                    Case 1 : SyncLock weightLock1 : lastWeight1 = value : End SyncLock
+                                    Case 2 : SyncLock weightLock2 : lastWeight2 = value : End SyncLock
+                                    Case 3 : SyncLock weightLock3 : lastWeight3 = value : End SyncLock
+                                End Select
+                                ' UI'ı direkt güncelle - PLC timer'a gerek yok
+                                UpdateWeightUI(weightIndex, value, True)
+                            End If
+                        End If
+                    ElseIf bytesRead = 0 Then
+                        Throw New IO.IOException("Bağlantı kapandı")
+                    End If
+
+                Catch ex As Exception
+                    If cancellationToken.IsCancellationRequested Then Exit While
+                    AddToListBox($"Tartı {weightIndex} hatası ({ip}:{port}): {ex.Message}")
+                    UpdateWeightUI(weightIndex, "ERR", False)
+                    ' Bağlantı koptu - temizle ve 2sn sonra tekrar dene
+                    If stream IsNot Nothing Then Try : stream.Close() : Catch : End Try
+                    If client IsNot Nothing Then Try : client.Close() : Catch : End Try
+                    client = Nothing
+                    stream = Nothing
+                    cancellationToken.WaitHandle.WaitOne(2000)
+                End Try
+            End While
+        Finally
+            If stream IsNot Nothing Then Try : stream.Close() : Catch : End Try
+            If client IsNot Nothing Then Try : client.Close() : Catch : End Try
+        End Try
+    End Sub
+
+    ' Tartı IP formatından sayısal değeri çıkar ("ST,GS,+00123.4 kg" → "123.4" gibi)
+    Private Function ExtractNumericValue(raw As String) As String
+        If String.IsNullOrWhiteSpace(raw) Then Return Nothing
+        ' Sayı, nokta, virgül ve eksi işaretini çıkar
+        Dim result As New System.Text.StringBuilder()
+        Dim hasDot As Boolean = False
+        For Each c As Char In raw
+            If Char.IsDigit(c) Then
+                result.Append(c)
+            ElseIf (c = "."c OrElse c = ","c) AndAlso Not hasDot Then
+                result.Append("."c)
+                hasDot = True
+            ElseIf c = "-"c AndAlso result.Length = 0 Then
+                result.Append(c)
+            End If
+        Next
+        Dim s As String = result.ToString().Trim("."c)
+        Return If(s.Length > 0, s, Nothing)
+    End Function
 
     Sub VeriOnay(Barkod As String, Hat As String, agirlik As String)
 
@@ -528,16 +667,13 @@ Partial Public Class frmBarkod
 
             ' Thread-safe UI update
             If Not String.IsNullOrEmpty(Sonuc) AndAlso Sonuc <> "ERROR: Unknown Hat" Then
-                Me.BeginInvoke(New Action(Sub() ListBox1.Items.Add(" " + Sonuc.ToString + "   " + weight)))
+                AddToListBox(" " + Sonuc.ToString + "   " + weight)
             End If
 
             cevap = True
         Catch ex As Exception
-            ' Thread-safe UI updates
-            Me.BeginInvoke(New Action(Sub()
-                                          ListBox1.Items.Add(ex.ToString)
-                                          TextBox1.Text += ex.ToString
-                                      End Sub))
+            AddToListBox(ex.Message)
+            AppendToErrorLog(ex.ToString)
             ' Log SAP exception with stack trace (using constant for length, safe null handling)
             Dim stackTrace As String = ""
             If ex.StackTrace IsNot Nothing Then
@@ -676,9 +812,6 @@ Partial Public Class frmBarkod
 
         Try
             ' Log thread start
-            CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                           ListBox1.Items.Add($"Thread başlatıldı ({hat}): {ip}:{port}")
-                                                                                       End Sub), New Object() {})
 
             While Not cancellationToken.IsCancellationRequested
                 Try
@@ -693,9 +826,6 @@ Partial Public Class frmBarkod
                         End If
 
                         ' Log connection attempt
-                        CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                                       ListBox1.Items.Add($"Bağlantı kuruluyor ({hat}): {ip}:{port}")
-                                                                                                   End Sub), New Object() {})
 
                         client = New TcpClient()
                         client.Connect(ip, port)
@@ -706,9 +836,6 @@ Partial Public Class frmBarkod
                         stream.ReadTimeout = System.Threading.Timeout.Infinite
 
                         UpdateConnectionStatus(hat, True)
-                        CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                                       ListBox1.Items.Add($"Bağlandı ({hat}): {ip}:{port}")
-                                                                                                   End Sub), New Object() {})
                     End If
 
                     ' Blocking read - waits indefinitely for data
@@ -719,20 +846,14 @@ Partial Public Class frmBarkod
                         Dim barcode As String = System.Text.Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim()
                         If Not String.IsNullOrWhiteSpace(barcode) Then
                             OnBarcodeReceived(ip, barcode)
-                            CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                                           ListBox1.Items.Add($"Barkod alındı ({hat}): {barcode}")
-                                                                                                       End Sub), New Object() {})
                         End If
                     ElseIf bytesRead = 0 Then
                         ' Connection closed by remote host
                         Throw New System.IO.IOException("Bağlantı uzak sunucu tarafından kapatıldı")
                     End If
 
-                    ' Periodic "still alive" logging
+                    ' Periodic "still alive" logging - only to file
                     If DateTime.Now.Subtract(lastLogTime).TotalSeconds >= logInterval Then
-                        CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                                       ListBox1.Items.Add($"Dinleniyor ({hat}): {ip}:{port}")
-                                                                                                   End Sub), New Object() {})
                         lastLogTime = DateTime.Now
                     End If
 
@@ -741,9 +862,7 @@ Partial Public Class frmBarkod
                     UpdateConnectionStatus(hat, False)
                     ' Log connection error
                     LogYaz.LogAllOperations(hat, "ERROR", $"Tür: Connection Error | Mesaj: {ex.Message}")
-                    CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                                   ListBox1.Items.Add($"Bağlantı hatası ({hat}): {ex.Message}")
-                                                                                               End Sub), New Object() {})
+                    AddToListBox($"Bağlantı hatası ({hat}): {ex.Message}")
 
                     If stream IsNot Nothing Then
                         Try
@@ -769,9 +888,7 @@ Partial Public Class frmBarkod
                     UpdateConnectionStatus(hat, False)
                     ' Log network error
                     LogYaz.LogAllOperations(hat, "ERROR", $"Tür: Network Error | Mesaj: {ex.Message}")
-                    CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                                   ListBox1.Items.Add($"Ağ hatası ({hat}): {ex.Message}")
-                                                                                               End Sub), New Object() {})
+                    AddToListBox($"Ağ hatası ({hat}): {ex.Message}")
 
                     If stream IsNot Nothing Then
                         Try
@@ -795,16 +912,12 @@ Partial Public Class frmBarkod
                 Catch ex As Exception
                     ' Other exceptions
                     LogYaz.LogAllOperations(hat, "ERROR", $"Tür: Barcode Reader Error | Mesaj: {ex.Message}")
-                    CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                                   ListBox1.Items.Add($"Beklenmeyen hata ({hat}): {ex.Message}")
-                                                                                               End Sub), New Object() {})
+                    AddToListBox($"Beklenmeyen hata ({hat}): {ex.Message}")
                 End Try
             End While
 
         Catch ex As Exception
-            CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                           ListBox1.Items.Add($"Thread hatası ({hat}): {ex.Message}")
-                                                                                       End Sub), New Object() {})
+            AddToListBox($"Thread hatası ({hat}): {ex.Message}")
         Finally
             ' Clean up resources
             If stream IsNot Nothing Then
@@ -822,9 +935,6 @@ Partial Public Class frmBarkod
             End If
 
             UpdateConnectionStatus(hat, False)
-            CType(Me, System.ComponentModel.ISynchronizeInvoke).BeginInvoke(New Action(Sub()
-                                                                                           ListBox1.Items.Add($"Thread sonlandırıldı ({hat})")
-                                                                                       End Sub), New Object() {})
         End Try
     End Sub
 
@@ -832,6 +942,12 @@ Partial Public Class frmBarkod
         txt_tartim1.Text = "0"
         txt_tartim2.Text = "0"
         txt_tartim3.Text = "0"
+
+        ' Timer interval ayarları (ms) - tartı okuma ve PLC kontrol hızı
+        Timer1.Interval = 1000  ' Tartı 1 okuma (her 1 saniye)
+        Timer2.Interval = 1000  ' Tartı 2 okuma (her 1 saniye)
+        Timer3.Interval = 1000  ' Tartı 3 okuma (her 1 saniye)
+        Timer4.Interval = 1000  ' PLC kontrol (SurroundingSub) (her 1 saniye)
 
         ' Initialize persistent SAP connection for performance
         InitializeSAPConnection()
@@ -856,48 +972,31 @@ Partial Public Class frmBarkod
             loggerThreadError.IsBackground = True
             loggerThreadError.Start()
 
-            ListBox1.Items.Add("Background logger threads başlatıldı (A, B, C, Error)")
+
         Catch ex As Exception
-            ListBox1.Items.Add("Logger thread başlatma hatası: " & ex.ToString)
-            TextBox1.Text += "Logger thread başlatma hatası: " & ex.ToString & vbCrLf
+            AddToListBox("Logger thread başlatma hatası: " & ex.Message)
+            AppendToErrorLog("Logger thread başlatma hatası: " & ex.ToString)
         End Try
 
         Timer4.Start()
 
+        ' Tartı okuma thread'lerini başlat (PuTTY gibi sürekli okuma)
         Try
-            If Not port1.IsOpen Then
-                port1.Open()
-                Button1.BackColor = Color.LimeGreen
-            Else
+            weightCancellationSource = New CancellationTokenSource()
 
-            End If
-        Catch ex As Exception When MsgBox("PORT HATASI")
-            Timer1.Stop()
-        End Try
+            weightThread1 = New Thread(Sub() WeightReaderThread(WEIGHT_IP_1, WEIGHT_PORT_1, 1, weightCancellationSource.Token))
+            weightThread1.IsBackground = True
+            weightThread1.Start()
 
+            weightThread2 = New Thread(Sub() WeightReaderThread(WEIGHT_IP_2, WEIGHT_PORT_2, 2, weightCancellationSource.Token))
+            weightThread2.IsBackground = True
+            weightThread2.Start()
 
-        Try
-            If Not port2.IsOpen Then
-                port2.Open()
-                Button2.BackColor = Color.LimeGreen
-            Else
-
-            End If
-        Catch ex As Exception When MsgBox("PORT HATASI")
-            Timer2.Stop()
-        End Try
-
-
-        Try
-
-            If Not port3.IsOpen Then
-                port3.Open()
-                Button3.BackColor = Color.LimeGreen
-            Else
-
-            End If
-        Catch ex As Exception When MsgBox("PORT HATASI")
-            Timer3.Stop()
+            weightThread3 = New Thread(Sub() WeightReaderThread(WEIGHT_IP_3, WEIGHT_PORT_3, 3, weightCancellationSource.Token))
+            weightThread3.IsBackground = True
+            weightThread3.Start()
+        Catch ex As Exception
+            AddToListBox($"Tartı thread başlatma hatası: {ex.Message}")
         End Try
 
         If PrevInstance() Then
@@ -914,8 +1013,8 @@ Partial Public Class frmBarkod
             threadA.IsBackground = True
             threadA.Start()
         Catch ex As Exception
-            ListBox1.Items.Add(ex.ToString)
-            TextBox1.Text += ex.ToString
+            AddToListBox(ex.Message)
+            AppendToErrorLog(ex.ToString)
         End Try
 
         Try
@@ -924,9 +1023,8 @@ Partial Public Class frmBarkod
             threadB.IsBackground = True
             threadB.Start()
         Catch ex As Exception
-            ListBox1.Items.Add(ex.ToString)
-            TextBox1.Text += ex.ToString
-
+            AddToListBox(ex.Message)
+            AppendToErrorLog(ex.ToString)
         End Try
 
         Try
@@ -935,8 +1033,8 @@ Partial Public Class frmBarkod
             threadC.IsBackground = True
             threadC.Start()
         Catch ex As Exception
-            ListBox1.Items.Add(ex.ToString)
-            TextBox1.Text += ex.ToString
+            AddToListBox(ex.Message)
+            AppendToErrorLog(ex.ToString)
 
         End Try
 
@@ -970,7 +1068,7 @@ Partial Public Class frmBarkod
 
         Dim sqlstr As String
 
-        sqlstr = "SELECT TOP 10 BARKOD, COUNT (*) ADET FROM [SIMFER].[dbo].[AMBAR] WHERE BARKOD LIKE '" & txtBarcode.Text & "%' GROUP BY  BARKOD"
+        sqlstr = "SELECT TOP 10 BARKOD, COUNT (*) ADET FROM [SIMFER].[dbo].[AMBAR] WHERE BARKOD LIKE '" & SqlEscape(txtBarcode.Text) & "%' GROUP BY  BARKOD"
 
         Dim DS As DataSet
         DS = Connect_DB_Select(sqlstr, enumDbType.Sql)
@@ -1039,8 +1137,8 @@ Partial Public Class frmBarkod
         Dim strFileName As String = My.Application.Info.DirectoryPath & "\" & Format(Now, "yyyyMMddHHss") & ".xls"
         wBook.SaveAs(strFileName)
 
-        ListBox1.Items.Add("Bilgiler Excele Aktar�lm��t�r.")
-        ListBox1.Items.Add(strFileName)
+        AddToListBox("Bilgiler Excele Aktarılmıştır.")
+        AddToListBox(strFileName)
 
         releaseObject(wSheet)
         wBook.Close(False)
@@ -1065,71 +1163,14 @@ Partial Public Class frmBarkod
     End Sub
 
 
+    ' Timer1/2/3 - PLC hattın aktifliğini kontrol eder, tartı gösterimi artık thread'den direkt geliyor
     Private Sub Timer1_Tick(sender As Object, e As EventArgs) Handles Timer1.Tick
-        Try
-            If port1.IsOpen Then
-                port1.Write("W")
-                Dim i As Single = port1.ReadExisting()
-                txt_tartim1.Text = i.ToString()
-                txt_tartim1.ForeColor = Color.LimeGreen
-                Button1.BackColor = Color.LimeGreen
-
-            Else
-                txt_tartim1.ForeColor = Color.Red
-                txt_tartim1.Text = "0"
-
-            End If
-
-
-
-        Catch ex As Exception
-
-        End Try
     End Sub
 
     Private Sub Timer2_Tick(sender As Object, e As EventArgs) Handles Timer2.Tick
-        Try
-            If port2.IsOpen Then
-                port2.Write("W")
-                Button2.BackColor = Color.LimeGreen
-                Dim j As Single = port2.ReadExisting()
-                txt_tartim2.Text = j.ToString()
-                txt_tartim2.ForeColor = Color.Yellow
-            Else
-                txt_tartim2.ForeColor = Color.Red
-                txt_tartim2.Text = "0"
-
-            End If
-
-
-
-
-        Catch ex As Exception
-
-        End Try
     End Sub
 
-
     Private Sub Timer3_Tick(sender As Object, e As EventArgs) Handles Timer3.Tick
-        Try
-            If port3.IsOpen Then
-                port3.Write("W")
-
-                Button3.BackColor = Color.LimeGreen
-                Dim f As Single = port3.ReadExisting()
-                txt_tartim3.Text = f.ToString()
-                txt_tartim3.ForeColor = Color.Orange
-            Else
-                txt_tartim3.ForeColor = Color.Red
-                txt_tartim3.Text = "0"
-            End If
-
-
-
-
-        Catch ex As Exception
-
-        End Try
     End Sub
 
     Private Sub Timer4_Tick(sender As Object, e As EventArgs) Handles Timer4.Tick
