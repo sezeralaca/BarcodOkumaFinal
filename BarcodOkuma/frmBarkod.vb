@@ -547,6 +547,21 @@ Partial Public Class frmBarkod
         Return If(s.Length > 0, s, Nothing)
     End Function
 
+    Private Function GetBantKodu(hat As String) As String
+        If String.IsNullOrWhiteSpace(hat) Then Return ""
+
+        Select Case hat.Trim().ToUpperInvariant()
+            Case "A"
+                Return "1"
+            Case "B"
+                Return "2"
+            Case "C"
+                Return "3"
+            Case Else
+                Return ""
+        End Select
+    End Function
+
     Sub VeriOnay(Barkod As String, Hat As String, agirlik As String)
 
         Dim cevap As Boolean = False
@@ -559,11 +574,14 @@ Partial Public Class frmBarkod
         Dim processStartTime As DateTime = DateTime.Now
         kolon = Hat
         weight = agirlik
+        Dim bant As String = GetBantKodu(Hat)
 
 
         Try
             ' Log SAP call start
-            LogYaz.LogAllOperations(Hat, "SAP_CALL_START", $"Barkod: {Barkod} | Ağırlık: {weight} | Tarih: {DateTime.Now.ToString("yyyy-MM-dd")}")
+            LogYaz.LogAllOperations(Hat, "SAP_CALL_START", $"Barkod: {Barkod} | Ağırlık: {weight} | BANT: {bant} | Tarih: {DateTime.Now.ToString("yyyy-MM-dd")}")
+            LogYaz.LogDebug(Hat, Barkod, $"SAP GONDERILEN | Agirlik: {weight} | BANT: {bant}")
+            AddToListBox($"SAP GONDERILEN -> Hat: {Hat} | Barkod: {Barkod} | Agirlik: {weight} | BANT: {bant}")
 
             ' Use hat-specific SAP connection for parallel processing
             ' Each hat (A, B, C) has its own connection and lock to avoid blocking
@@ -577,6 +595,7 @@ Partial Public Class frmBarkod
 
                         Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
                         p.AGIRLIK = weight
+                        p.BANT = bant
                         p.SERINO = Barkod
                         p.TARIH = DateTime.Now.ToString("yyyy-MM-dd")
                         Dim parray As ZSFR_MM_008_S_02() = New ZSFR_MM_008_S_02(0) {}
@@ -607,6 +626,7 @@ Partial Public Class frmBarkod
 
                         Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
                         p.AGIRLIK = weight
+                        p.BANT = bant
                         p.SERINO = Barkod
                         p.TARIH = DateTime.Now.ToString("yyyy-MM-dd")
                         Dim parray As ZSFR_MM_008_S_02() = New ZSFR_MM_008_S_02(0) {}
@@ -637,6 +657,7 @@ Partial Public Class frmBarkod
 
                         Dim p As ZSFR_MM_008_S_02 = New ZSFR_MM_008_S_02()
                         p.AGIRLIK = weight
+                        p.BANT = bant
                         p.SERINO = Barkod
                         p.TARIH = DateTime.Now.ToString("yyyy-MM-dd")
                         Dim parray As ZSFR_MM_008_S_02() = New ZSFR_MM_008_S_02(0) {}

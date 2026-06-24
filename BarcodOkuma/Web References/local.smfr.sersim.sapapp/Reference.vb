@@ -156,6 +156,8 @@ Namespace local.smfr.sersim.sapapp
         Private sERINOField As String
         
         Private aGIRLIKField As String
+
+        Private bANTField As String
         
         Private tARIHField As String
 
@@ -180,6 +182,17 @@ Namespace local.smfr.sersim.sapapp
             End Get
             Set
                 Me.aGIRLIKField = value
+            End Set
+        End Property
+
+        '''<remarks/>
+        <System.Xml.Serialization.XmlElementAttribute(Form:=System.Xml.Schema.XmlSchemaForm.Unqualified)>  _
+        Public Property BANT() As String
+            Get
+                Return Me.bANTField
+            End Get
+            Set
+                Me.bANTField = value
             End Set
         End Property
         

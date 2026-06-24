@@ -166,6 +166,11 @@
           <xsd:maxLength value="10" />
         </xsd:restriction>
       </xsd:simpleType>
+      <xsd:simpleType name="char8">
+        <xsd:restriction base="xsd:string">
+          <xsd:maxLength value="8" />
+        </xsd:restriction>
+      </xsd:simpleType>
       <xsd:simpleType name="char12">
         <xsd:restriction base="xsd:string">
           <xsd:maxLength value="12" />
@@ -212,6 +217,7 @@
         <xsd:sequence>
           <xsd:element name="SERINO" type="tns:char30" />
           <xsd:element name="AGIRLIK" type="tns:char13" />
+          <xsd:element name="BANT" type="tns:char8" />
           <xsd:element name="TARIH" type="tns:date10" />
           <xsd:element name="ZAMAN" type="tns:time" />
         </xsd:sequence>
